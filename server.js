@@ -1,106 +1,97 @@
-/* eslint-disable no-console */
-import express from 'express';
-import cors from 'cors';
+// collector/server.js
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+const db = require('./db');
 
 const app = express();
-
-// --- Middlewares ---
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-// sendBeacon için: text/plain gövdeleri de alalım
-app.use(express.text({ type: ['text/plain'] }));
-
-// Basit sağlık kontrolü
-app.get('/health', (_req, res) => res.json({ ok: true }));
-
-/**
- * Tüm event istekleri için ortak handler
- * /e, /collect, /api/collect -> hepsi buraya geliyor
- */
-async function handleCollect(req, res) {
-  try {
-    const method = req.method;
-
-    // 1) Paramları topla (GET->query, POST->body)
-    let params = method === 'GET' ? req.query : req.body;
-
-    // 2) sendBeacon gibi durumlarda body string gelebilir (text/plain)
-    if (typeof params === 'string' && params.trim() !== '') {
-      try {
-        params = JSON.parse(params);
-      } catch {
-        // URL-encoded string geldiyse (olasılık düşük) onu da dene
-        try {
-          params = Object.fromEntries(new URLSearchParams(params));
-        } catch {
-          // Yine de parse edemediysek boş bırak
-        }
-      }
-    }
-
-    // 3) Zorunlular
-    const required = ['shopId', 'event'];
-    const missing = required.filter((k) => !params?.[k]);
-
-    if (missing.length) {
-      return res.status(400).json({
-        ok: false,
-        error: 'missing_params',
-        required: missing,
-      });
-    }
-
-    const { shopId, event } = params;
-    const productHandle = params.productHandle ?? null;
-    const buttonId = params.buttonId ?? null;
-
-    let extra = null;
-    if (params.extra != null) {
-      extra =
-        typeof params.extra === 'string'
-          ? safeJsonParse(params.extra)
-          : params.extra;
-    }
-
-    if (process.env.LOG_REQUESTS) {
-      console.log(
-        '[collect]',
-        JSON.stringify({ method, shopId, event, productHandle, buttonId, extra })
-      );
-    }
-
-    // Burada DB'ye yazma/queue'ya atma vb yapılabilir.
-    // Bu demo için hızlı dönüyoruz.
-    return res.status(204).end();
-  } catch (err) {
-    console.error('internal_error:', err);
-    return res
-      .status(500)
-      .json({ ok: false, error: 'internal_error' });
-  }
-}
-
-function safeJsonParse(s) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
-
-// --- Tüm rotaları bağla ---
-// GET ve POST'u destekle
-app.all(['/e', '/collect', '/api/collect'], handleCollect);
-
-// (Opsiyonel) test-send.html ve statik dosyalar için -
-// zip'te public klasörü yoktu, ama eklersen:
-// app.use(express.static('collector'));
-
-// Port/host
 const PORT = process.env.PORT || 8080;
-const HOST = '0.0.0.0';
 
-app.listen(PORT, HOST, () => {
+// CORS + body parsers
+app.use(cors());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Test sayfasını ve diğer statik dosyaları servis et (test-send.html vb.)
+app.use(express.static(__dirname));
+
+// Sağlık kontrolü
+app.get(['/health', '/'], (req, res) => res.json({ ok: true, service: 'collector' }));
+
+// Ortak payload toplayıcı
+function parsePayload(req) {
+  const isGet = req.method === 'GET';
+  const src = isGet ? req.query : (req.body || {});
+
+  const shopId =
+    src.shopId || src.shopid || src.shop || src.shop_id || src['shop-id'];
+  const event = src.event || src.evt || src.type;
+  const productHandle =
+    src.productHandle || src.product || src.handle || src.product_handle;
+  const buttonId = src.buttonId || src.button || src.btn || src.button_id;
+
+  let extra = src.extra;
+  if (typeof extra === 'string') {
+    try { extra = JSON.parse(extra); } catch { /* string kalsın */ }
+  }
+
+  const ip =
+    req.headers['cf-connecting-ip'] ||
+    req.headers['x-forwarded-for'] ||
+    req.socket?.remoteAddress ||
+    null;
+
+  return {
+    shopId,
+    event,
+    productHandle: productHandle || null,
+    buttonId: buttonId || null,
+    extra: extra ?? null,
+    ip,
+    ua: req.headers['user-agent'] || null,
+  };
+}
+
+async function handleCollect(req, res) {
+  const p = parsePayload(req);
+
+  if (!p.shopId || !p.event) {
+    return res
+      .status(400)
+      .json({ ok: false, error: 'missing_params', required: ['shopId', 'event'] });
+  }
+
+  try {
+    await db.query(
+      `INSERT INTO events
+       (shop_id, event, product_handle, button_id, extra, ip, ua, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())`,
+      [
+        p.shopId,
+        p.event,
+        p.productHandle,
+        p.buttonId,
+        p.extra ? JSON.stringify(p.extra) : null,
+        p.ip,
+        p.ua,
+      ]
+    );
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('DB insert failed:', err);
+    return res.status(500).json({ ok: false, error: 'internal_error' });
+  }
+}
+
+// Esas toplama endpoint’leri (GET/POST hepsi)
+app.all(['/collect', '/api/collect', '/e'], handleCollect);
+
+// Son çare 404 (JSON döner, debug için path gösterir)
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: 'not_found', path: req.path });
+});
+
+app.listen(PORT, () => {
   console.log(`Collector listening on http://localhost:${PORT}`);
 });
