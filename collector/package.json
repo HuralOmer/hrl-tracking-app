@@ -1,19 +1,23 @@
 {
-  "name": "collector",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "hrl-tracking-collector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Event collector API for HRL Tracking App (Shopify)",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "prestart": "node migrate.js",
+    "start": "node server.js",
+    "migrate": "node migrate.js",
+    "query:last5": "node query-last5.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "cors": "^2.8.5",
-    "dotenv": "^17.2.1",
-    "express": "^5.1.0",
-    "pg": "^8.16.3",
-    "ua-parser-js": "^2.0.4"
-  },
-  "description": ""
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "ua-parser-js": "^1.0.39"
+  }
 }
