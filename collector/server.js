@@ -1,129 +1,173 @@
 // collector/server.js
-require('dotenv').config();
+const express = require("express");
+const path = require("path");
+const { Pool } = require("pg");
 
-const path = require('path');
-const express = require('express');
-const cors = require('cors');
-const { Pool } = require('pg');
+const PORT = process.env.PORT || 8080;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 
-const app = express();
-
-/* ------------ DB ------------- */
-const connectionString =
-  process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.SUPABASE_DB_URL;
-
-const isLocal =
-  !connectionString || /localhost|127\.0\.0\.1/i.test(connectionString);
-
+// --- PG pool (Railway/Supabase uyumlu SSL) ---
 const pool = new Pool({
-  connectionString,
-  ssl: isLocal ? false : { rejectUnauthorized: false },
+  connectionString: process.env.DATABASE_URL,
+  ssl:
+    process.env.NODE_ENV === "production"
+      ? { rejectUnauthorized: false }
+      : false,
 });
 
-/* ---------- Middlewares ---------- */
-// Railway / proxy arkasında gerçek IP için
-app.set('trust proxy', 1);
+const app = express();
+app.set("trust proxy", true);
 
-// Basit istek logu (teşhis için çok faydalı)
-app.use((req, _res, next) => {
-  console.log(`[REQ] ${req.method} ${req.url}`);
+// basit CORS
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
-// CORS (gerekirse daha kısıtlı ayarlayabilirsiniz)
-app.use(cors());
+if (process.env.LOG_REQUESTS === "1") {
+  app.use((req, _res, next) => {
+    console.log(`[req] ${req.method} ${req.url}`);
+    next();
+  });
+}
 
-// JSON ve form body
-app.use(express.json({ limit: '512kb' }));
+app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// sendBeacon için: content-type genelde text/plain oluyor
-app.use('/e', express.text({ type: ['text/plain'] }));
+// statik test sayfası
+app.use(express.static(path.join(__dirname)));
 
-// Statik dosyalar (test-send.html, dashboard.html vb.)
-app.use(express.static(__dirname));
+// sağlık
+app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-/* ---------- Health & Root ---------- */
-app.get('/healthz', (_req, res) => res.status(200).send('OK'));
-app.get('/', (_req, res) =>
-  res.send('HRL Tracking Collector is running. Try /healthz, /test-send.html or /stats/summary')
-);
+// ---- Event toplama ----
+const ALLOWED = new Set(["page_view_start", "page_view_end", "click"]);
 
-/* ---------- Event Ingest (/e) ---------- */
-/**
- * test-send.html hem fetch JSON, hem de sendBeacon ile gönderiyor.
- * Beacon -> text/plain string gelir; burada JSON.parse ediyoruz.
- */
-app.post('/e', async (req, res) => {
+app.post("/e", async (req, res) => {
   try {
-    const payload = req.is('text/plain') ? JSON.parse(req.body || '{}') : req.body || {};
+    // hem query hem body’den oku
+    const get = (k) =>
+      (req.body?.[k] ?? req.query?.[k] ?? "").toString().trim();
 
-    const {
-      event,
-      shopId,
-      product_handle = null,
-      button_id = null,
-      dwell_ms = null,
-      extra = null,
-    } = payload;
+    const event = get("event");
+    const shopId = get("shopId") || get("shop_id");
+    const productHandle = get("product") || get("product_handle");
+    const buttonId = get("button_id");
+    const dwellMsStr = get("dwellMs") || get("dwell_ms");
 
-    if (!event || !shopId) {
-      return res.status(400).json({ ok: false, error: 'event ve shopId zorunlu' });
+    if (!event || !ALLOWED.has(event)) {
+      return res.status(400).json({ ok: false, error: "invalid_event" });
+    }
+    if (!shopId) {
+      return res.status(400).json({ ok: false, error: "missing_shopId" });
     }
 
-    const userAgent = req.headers['user-agent'] || null;
-    const ip =
-      (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim() ||
-      req.ip ||
-      null;
+    // extra: string gelmişse JSON’a çevir
+    let extra = req.body?.extra ?? req.query?.extra ?? null;
+    if (typeof extra === "string" && extra.length) {
+      try {
+        extra = JSON.parse(extra);
+      } catch {
+        // bozuksa, düz string olarak sakla
+      }
+    }
 
-    // events tablosu: shop_id, event, product_handle, button_id, dwell_ms, user_agent, ip, extra, ts(default now)
+    const dwellMs =
+      dwellMsStr !== "" && !Number.isNaN(Number(dwellMsStr))
+        ? Number(dwellMsStr)
+        : null;
+
+    const userAgent = req.get("user-agent") || null;
+    const ip =
+      (req.headers["x-forwarded-for"] || req.ip || "")
+        .toString()
+        .split(",")[0]
+        .trim() || null;
+
+    // DB insert
     const sql = `
       INSERT INTO events
-        (shop_id, event, product_handle, button_id, dwell_ms, user_agent, ip, extra)
+        (event_type, shop_id, product_handle, button_id, dwell_ms, extra, user_agent, ip)
       VALUES
-        ($1,      $2,    $3,             $4,        $5,        $6,        $7, $8::jsonb)
+        ($1,         $2,      NULLIF($3,''),  NULLIF($4,''), $5,      $6,   $7,        $8)
       RETURNING id
     `;
     const params = [
-      shopId,
       event,
-      product_handle,
-      button_id,
-      dwell_ms,
+      shopId,
+      productHandle,
+      buttonId,
+      dwellMs,
+      extra ?? null,
       userAgent,
-      ip,
-      extra ? JSON.stringify(extra) : null,
+      ip || null,
     ];
 
-    await pool.query(sql, params);
+    const { rows } = await pool.query(sql, params);
 
-    // Collector uçları için 204 ideal
-    return res.status(204).end();
+    return res.json({ ok: true, id: rows[0].id });
   } catch (err) {
-    console.error('Error in /e:', err);
-    return res.status(500).json({ ok: false, error: 'internal_error' });
+    // detaylı log (sadece sunucu tarafında)
+    console.error("[/e] insert failed:", err);
+
+    // İstersen geçici olarak ayrıntıyı görmek için DEBUG_ERRORS=1 ekleyebilirsin
+    const payload =
+      process.env.DEBUG_ERRORS === "1"
+        ? { ok: false, error: "internal_error", code: err.code, message: err.message }
+        : { ok: false, error: "internal_error" };
+
+    return res.status(500).json(payload);
   }
 });
 
-/* ---------- Stats Routes ---------- */
-// stats-routes.js bir Router export ediyorsa:
-try {
-  const statsRoutes = require('./stats-routes');
-  // Eğer stats-routes bir fonksiyon döndürüyorsa havuzu geçelim, değilse direkt kullanılır
-  const router = typeof statsRoutes === 'function' ? statsRoutes(pool) : statsRoutes;
-  app.use('/stats', router);
-} catch (e) {
-  console.warn('stats-routes yüklenemedi:', e?.message || e);
-}
+// ---- Basit istatistik uçları ----
+app.get("/stats/summary", async (req, res) => {
+  try {
+    const shopId = (req.query.shopId || req.query.shop_id || "").toString().trim();
+    if (!shopId) return res.status(400).json({ error: "missing_shopId" });
 
-/* ---------- Hata Yakalama ---------- */
-app.use((req, res) => {
-  res.status(404).json({ ok: false, error: 'not_found' });
+    const viewsQ = `
+      SELECT
+        COUNT(*) FILTER (WHERE event_type IN ('page_view_start','page_view_end'))::int AS views,
+        COALESCE(AVG(dwell_ms)::int, 0) AS avg_dwell_ms,
+        COUNT(*) FILTER (WHERE event_type = 'click')::int AS clicks
+      FROM events
+      WHERE shop_id = $1
+    `;
+    const { rows } = await pool.query(viewsQ, [shopId]);
+    res.json(rows[0]);
+  } catch (e) {
+    console.error("[/stats/summary] failed:", e);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
 });
 
-/* ---------- Start ---------- */
-const PORT = process.env.PORT || 8080;
+app.get("/stats/top-products", async (req, res) => {
+  try {
+    const shopId = (req.query.shopId || req.query.shop_id || "").toString().trim();
+    if (!shopId) return res.status(400).json({ error: "missing_shopId" });
+
+    const q = `
+      SELECT product_handle,
+             COUNT(*) FILTER (WHERE event_type IN ('page_view_start','page_view_end'))::int AS views,
+             COUNT(*) FILTER (WHERE event_type='click')::int AS clicks
+      FROM events
+      WHERE shop_id=$1
+      GROUP BY product_handle
+      ORDER BY views DESC NULLS LAST
+      LIMIT 20
+    `;
+    const { rows } = await pool.query(q, [shopId]);
+    res.json(rows);
+  } catch (e) {
+    console.error("[/stats/top-products] failed:", e);
+    res.status(500).json({ ok: false, error: "internal_error" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Collector listening on http://localhost:${PORT}`);
 });
