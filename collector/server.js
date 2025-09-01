@@ -1,63 +1,129 @@
-// server.js (DB'ye yazan + insert log'lu)
+// collector/server.js
+require('dotenv').config();
+
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const UAParser = require('ua-parser-js');
-require('dotenv').config();
-const { pool } = require('./db');
+const { Pool } = require('pg');
 
 const app = express();
-const statsRoutes = require('./stats-routes'); 
 
+/* ------------ DB ------------- */
+const connectionString =
+  process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.SUPABASE_DB_URL;
 
-// CORS (dev için açık; prod'da domain ile kısıtlayacağız)
-const allowed = (process.env.ALLOWED_ORIGINS || '*').split(',').map(s => s.trim());
-app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowed.includes('*') || allowed.includes(origin)) return cb(null, true);
-    return cb(new Error('Origin not allowed by CORS'));
-  }
-}));
+const isLocal =
+  !connectionString || /localhost|127\.0\.0\.1/i.test(connectionString);
 
-app.use(express.json({ limit: '64kb' }));
-app.get('/health', (req, res) => res.status(200).send('ok'));
-app.use('/stats', statsRoutes); 
+const pool = new Pool({
+  connectionString,
+  ssl: isLocal ? false : { rejectUnauthorized: false },
+});
 
-const ALLOWED_EVENTS = new Set(['page_view_start', 'page_view_end', 'click']);
+/* ---------- Middlewares ---------- */
+// Railway / proxy arkasında gerçek IP için
+app.set('trust proxy', 1);
 
+// Basit istek logu (teşhis için çok faydalı)
+app.use((req, _res, next) => {
+  console.log(`[REQ] ${req.method} ${req.url}`);
+  next();
+});
+
+// CORS (gerekirse daha kısıtlı ayarlayabilirsiniz)
+app.use(cors());
+
+// JSON ve form body
+app.use(express.json({ limit: '512kb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// sendBeacon için: content-type genelde text/plain oluyor
+app.use('/e', express.text({ type: ['text/plain'] }));
+
+// Statik dosyalar (test-send.html, dashboard.html vb.)
+app.use(express.static(__dirname));
+
+/* ---------- Health & Root ---------- */
+app.get('/healthz', (_req, res) => res.status(200).send('OK'));
+app.get('/', (_req, res) =>
+  res.send('HRL Tracking Collector is running. Try /healthz, /test-send.html or /stats/summary')
+);
+
+/* ---------- Event Ingest (/e) ---------- */
+/**
+ * test-send.html hem fetch JSON, hem de sendBeacon ile gönderiyor.
+ * Beacon -> text/plain string gelir; burada JSON.parse ediyoruz.
+ */
 app.post('/e', async (req, res) => {
   try {
-    const { ts, shopId, event, url, referrer, ua, productHandle, data } = req.body || {};
-    if (!shopId || !event || !ts) return res.status(400).json({ error: 'Missing ts/shopId/event' });
-    if (!ALLOWED_EVENTS.has(event)) return res.status(400).json({ error: 'Unknown event' });
+    const payload = req.is('text/plain') ? JSON.parse(req.body || '{}') : req.body || {};
 
-    // IP'yi kaydetmiyoruz; header ile şehir/ülke gelebilir
-    const region_city = req.headers['x-geo-city'] || null;
-    const region_country = req.headers['x-geo-country'] || null;
+    const {
+      event,
+      shopId,
+      product_handle = null,
+      button_id = null,
+      dwell_ms = null,
+      extra = null,
+    } = payload;
 
-    // UA parse
-    const parsed = new UAParser(ua || '').getResult();
-    const device = parsed.device?.model || parsed.device?.type || 'unknown';
-    const os = parsed.os?.name ? `${parsed.os.name} ${parsed.os.version || ''}`.trim() : 'unknown';
-    const browser = parsed.browser?.name ? `${parsed.browser.name} ${parsed.browser.version || ''}`.trim() : 'unknown';
+    if (!event || !shopId) {
+      return res.status(400).json({ ok: false, error: 'event ve shopId zorunlu' });
+    }
 
-    const { rows } = await pool.query(
-      `insert into events
-       (ts, shop_id, event_name, url, referrer, ua, device, os, browser,
-        region_country, region_city, product_handle, payload)
-       values (to_timestamp($1/1000.0), $2, $3, $4, $5, $6, $7, $8, $9,
-               $10, $11, $12, $13)
-       returning id`,
-      [ts, shopId, event, url, referrer, ua || '', device, os, browser,
-       region_country, region_city, productHandle || null, data || {}]
-    );
+    const userAgent = req.headers['user-agent'] || null;
+    const ip =
+      (req.headers['x-forwarded-for'] || '').toString().split(',')[0].trim() ||
+      req.ip ||
+      null;
 
-    console.log('✅ saved event', { id: rows[0].id, shopId, event });
+    // events tablosu: shop_id, event, product_handle, button_id, dwell_ms, user_agent, ip, extra, ts(default now)
+    const sql = `
+      INSERT INTO events
+        (shop_id, event, product_handle, button_id, dwell_ms, user_agent, ip, extra)
+      VALUES
+        ($1,      $2,    $3,             $4,        $5,        $6,        $7, $8::jsonb)
+      RETURNING id
+    `;
+    const params = [
+      shopId,
+      event,
+      product_handle,
+      button_id,
+      dwell_ms,
+      userAgent,
+      ip,
+      extra ? JSON.stringify(extra) : null,
+    ];
+
+    await pool.query(sql, params);
+
+    // Collector uçları için 204 ideal
     return res.status(204).end();
   } catch (err) {
-    console.error('collector error:', err);
-    return res.status(500).json({ error: 'server_error' });
+    console.error('Error in /e:', err);
+    return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Collector listening on http://localhost:${PORT}`));
+/* ---------- Stats Routes ---------- */
+// stats-routes.js bir Router export ediyorsa:
+try {
+  const statsRoutes = require('./stats-routes');
+  // Eğer stats-routes bir fonksiyon döndürüyorsa havuzu geçelim, değilse direkt kullanılır
+  const router = typeof statsRoutes === 'function' ? statsRoutes(pool) : statsRoutes;
+  app.use('/stats', router);
+} catch (e) {
+  console.warn('stats-routes yüklenemedi:', e?.message || e);
+}
+
+/* ---------- Hata Yakalama ---------- */
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: 'not_found' });
+});
+
+/* ---------- Start ---------- */
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`Collector listening on http://localhost:${PORT}`);
+});
