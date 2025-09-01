@@ -3,141 +3,143 @@
 <head>
   <meta charset="utf-8" />
   <title>Collector Test (GÜNCEL)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
-    h1 { margin-top: 0; }
-    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-    input[type="text"] { padding: 8px 10px; min-width: 260px; }
-    button { padding: 8px 12px; cursor: pointer; }
-    hr { margin: 16px 0; }
-    .log { background:#0b1020; color:#dfe6ff; padding:16px; border-radius:8px; min-height:120px; white-space:pre-wrap; }
-    .ok { color:#8ef59b; }
-    .err { color:#ff7a7a; }
-    small.hint{opacity:.7}
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 20px; }
+    input, button { padding: 8px 10px; font-size: 14px; }
+    .row { margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    #log { background:#0b1020; color:#f2f5ff; padding:14px; border-radius:8px; min-height:160px; white-space:pre-wrap; }
+    .ok { color:#8fffa8 }
+    .err { color:#ff7a7a }
   </style>
 </head>
 <body>
   <h1>Collector Test (GÜNCEL)</h1>
 
   <div class="row">
-    <label>Endpoint:&nbsp;
-      <input id="endpoint" type="text"
-        value="https://hrl-tracking-app-production-9cbc.up.railway.app/e" />
-    </label>
+    <b>Endpoint:</b>
+    <input id="endpoint" size="48" value="https://hrl-tracking-app-production-9cbc.up.railway.app">
   </div>
-
-  <div class="row" style="margin-top:8px;">
-    <label>Shop ID:&nbsp;
-      <input id="shopId" type="text" value="dev-shop.myshopify.com" />
-    </label>
-
-    <label>Product handle:&nbsp;
-      <input id="productHandle" type="text" value="black-mug" />
-    </label>
-  </div>
-
-  <hr />
 
   <div class="row">
-    <button id="btnPvsAuto">page_view_start (otomatik de gönderilir)</button>
-    <button id="btnPveFetch">page_view_end (fetch)</button>
+    <b>Shop ID:</b>
+    <input id="shopId" size="28" value="dev-shop.myshopify.com">
+    <span style="margin-left:16px"><b>Product handle:</b></span>
+    <input id="productHandle" size="18" value="black-mug">
+  </div>
+
+  <div class="row">
+    <button id="btnPvs">page_view_start (otomatik de gönderilir)</button>
+    <button id="btnPve">page_view_end (fetch)</button>
     <button id="btnPveBeacon">page_view_end (sendBeacon)</button>
   </div>
 
-  <div class="row" style="margin-top:10px;">
-    <button id="btnClick">click (add-to-cart)</button>
-    <button id="btnClick2">click x2 (await, 200ms ara)</button>
+  <div class="row">
+    <button id="btnAddToCart">click (add-to-cart)</button>
+    <button id="btnDoubleClick">click x2 (await, 200ms ara)</button>
+    <span><b>Özel button_id:</b></span>
+    <input id="customButton" size="12" value="buy-now">
+    <button id="btnCustomClick">click (özel)</button>
   </div>
 
-  <div class="row" style="margin-top:10px;">
-    <label>Özel button_id:&nbsp;
-      <input id="customBtnId" type="text" value="buy-now" />
-    </label>
-    <button id="btnClickCustom">click (özel)</button>
-  </div>
-
-  <p><small class="hint">Not: Görüntüleme için <code>page_view_start</code>, süre/oturum sonu için <code>page_view_end</code>, tıklama sayısı için <code>click</code> kullanılıyor.</small></p>
-
-  <div id="log" class="log"></div>
+  <div id="log"></div>
 
   <script>
-    const $ = (id) => document.getElementById(id);
-    const log = (msg, ok = true) => {
-      const box = $("log");
-      const line = (ok ? "✓ " : "✗ ") + msg;
-      const span = document.createElement("div");
-      span.className = ok ? "ok" : "err";
-      span.textContent = line;
-      box.appendChild(span);
-      box.scrollTop = box.scrollHeight;
-    };
+    const $ = s => document.querySelector(s);
+    const endpointInput = $('#endpoint');
+    const shopInput = $('#shopId');
+    const handleInput = $('#productHandle');
+    const customButtonInput = $('#customButton');
+    const log = $('#log');
 
-    function buildPayload(event, extras = {}) {
-      return {
-        shopId: $("shopId").value.trim(),
-        event, // "page_view_start" | "page_view_end" | "click"
-        product_handle: $("productHandle").value.trim() || undefined,
-        button_id: extras.button_id || undefined,
-        extra: extras.extra || undefined,
-      };
+    function baseUrl() {
+      return endpointInput.value.replace(/\/+$/, ''); // sondaki / temizle
+    }
+    function logLine(txt, ok=false) {
+      const span = document.createElement('div');
+      span.className = ok ? 'ok' : 'err';
+      span.textContent = (ok ? '✓ ' : '✗ ') + txt;
+      log.append(span);
+      log.append(document.createElement('br'));
+      log.scrollTop = log.scrollHeight;
     }
 
-    async function sendFetch(event, extras = {}) {
-      const endpoint = $("endpoint").value.trim();
-      const body = buildPayload(event, extras);
+    async function postCollect(payload) {
+      const url = baseUrl() + '/collect';
+      const body = {
+        shopId: shopInput.value.trim(),
+        ...payload,                        // event zorunlu burada gelmeli
+        productHandle: handleInput.value.trim() || undefined,
+      };
+
+      logLine(`fetch sent ${JSON.stringify(body)}`);
       try {
-        const res = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-          keepalive: true,
+          credentials: 'omit',
         });
-        const ok = res.ok;
-        log(`fetch sent ${JSON.stringify({ event, ...extras })}`, ok);
-        if (!ok) {
-          const t = await res.text();
-          log(`response ${res.status}: ${t}`, false);
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.ok) {
+          logLine(`response ${res.status}: ${JSON.stringify(json)}`, true);
+        } else {
+          logLine(`response ${res.status}: ${JSON.stringify(json)}`);
         }
       } catch (e) {
-        log(`fetch error: ${e.message}`, false);
+        logLine(`network error: ${e.message}`);
       }
     }
 
-    function sendBeacon(event, extras = {}) {
-      const endpoint = $("endpoint").value.trim();
-      const body = buildPayload(event, extras);
-      const blob = new Blob([JSON.stringify(body)], { type: "application/json" });
-      const ok = navigator.sendBeacon(endpoint, blob);
-      log(`beacon sent ${JSON.stringify({ event, ...extras })}`, ok);
-      if (!ok) log("sendBeacon returned false", false);
+    function beaconCollect(payload) {
+      const url = baseUrl() + '/collect';
+      const data = new URLSearchParams();
+      data.set('shopId', shopInput.value.trim());
+      Object.entries(payload).forEach(([k,v]) => {
+        if (typeof v === 'object') data.set(k, JSON.stringify(v));
+        else data.set(k, String(v));
+      });
+
+      const ok = navigator.sendBeacon(url, data);
+      if (ok) logLine(`beacon sent ${JSON.stringify(Object.fromEntries(data))}`, true);
+      else logLine('beacon failed to enqueue');
     }
 
-    // UI handlers
-    $("btnPvsAuto").onclick = () =>
-      sendFetch("page_view_start", { extra: { route: "product" } });
+    // Butonlar
+    $('#btnPvs').onclick = () => postCollect({
+      event: 'page_view_start',
+      extra: { route: 'product' },
+    });
 
-    $("btnPveFetch").onclick = () =>
-      sendFetch("page_view_end", { extra: { reason: "manual" } });
+    $('#btnPve').onclick = () => postCollect({
+      event: 'page_view_end',
+      extra: { reason: 'manual' },
+    });
 
-    $("btnPveBeacon").onclick = () =>
-      sendBeacon("page_view_end", { extra: { reason: "beacon" } });
+    $('#btnPveBeacon').onclick = () => beaconCollect({
+      event: 'page_view_end',
+      extra: { reason: 'beacon' },
+    });
 
-    $("btnClick").onclick = () =>
-      sendFetch("click", { button_id: "add-to-cart" });
+    $('#btnAddToCart').onclick = () => postCollect({
+      event: 'click',
+      buttonId: 'add-to-cart',
+    });
 
-    $("btnClick2").onclick = async () => {
-      await sendFetch("click", { button_id: "add-to-cart" });
+    $('#btnDoubleClick').onclick = async () => {
+      await postCollect({ event: 'click', buttonId: 'add-to-cart' });
       await new Promise(r => setTimeout(r, 200));
-      await sendFetch("click", { button_id: "add-to-cart" });
+      await postCollect({ event: 'click', buttonId: 'add-to-cart' });
     };
 
-    $("btnClickCustom").onclick = () =>
-      sendFetch("click", { button_id: $("customBtnId").value.trim() || "custom-btn" });
+    $('#btnCustomClick').onclick = () => postCollect({
+      event: 'click',
+      buttonId: customButtonInput.value.trim() || 'buy-now',
+    });
 
-    // Sayfa açılışında otomatik page_view_start
-    window.addEventListener("load", () => {
-      sendFetch("page_view_start", { extra: { route: "product" } });
+    // Sayfa açılışında otomatik ilk görüntüleme
+    window.addEventListener('load', () => {
+      postCollect({ event: 'page_view_start', extra: { route: 'product' } });
     });
   </script>
 </body>
