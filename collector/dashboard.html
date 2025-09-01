@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>HRL Tracking - Dashboard (MVP)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .cards { display: flex; gap: 16px; margin-bottom: 24px; }
+    .card { border: 1px solid #ddd; padding: 16px; border-radius: 8px; min-width: 180px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+    th, td { border: 1px solid #eee; padding: 8px; text-align: left; }
+    th { background: #fafafa; }
+    input { padding: 6px 8px; margin-right: 8px; }
+    button { padding: 6px 10px; }
+  </style>
+</head>
+<body>
+  <h1>HRL Tracking — Dashboard (MVP)</h1>
+
+  <div style="margin: 8px 0;">
+    <label>Shop ID:</label>
+    <input id="shop" value="dev-shop.myshopify.com" />
+    <label>From:</label>
+    <input id="from" type="date" />
+    <label>To:</label>
+    <input id="to" type="date" />
+    <button id="load">Load</button>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div>Views</div><h2 id="views">-</h2></div>
+    <div class="card"><div>Avg Dwell (ms)</div><h2 id="dwell">-</h2></div>
+    <div class="card"><div>Clicks</div><h2 id="clicks">-</h2></div>
+  </div>
+
+  <h3>Top Buttons</h3>
+  <table id="tb"><thead><tr><th>Button ID</th><th>Clicks</th></tr></thead><tbody></tbody></table>
+
+  <h3>Top Products</h3>
+  <table id="tp"><thead><tr><th>Product Handle</th><th>Views</th><th>Avg Dwell (ms)</th></tr></thead><tbody></tbody></table>
+
+<script>
+const api = 'http://localhost:3000/stats';
+function iso(d){ return d.toISOString().slice(0,10); }
+(function presetDates(){
+  const to = new Date();
+  const from = new Date(Date.now() - 7*24*60*60*1000);
+  document.getElementById('from').value = iso(from);
+  document.getElementById('to').value = iso(to);
+})();
+async function load(){
+  const shop = document.getElementById('shop').value.trim();
+  const from = document.getElementById('from').value;
+  const to = document.getElementById('to').value;
+  const qs = `?shopId=${encodeURIComponent(shop)}&from=${from}&to=${to}`;
+
+  const s = await fetch(api + '/summary' + qs).then(r=>r.json());
+  document.getElementById('views').innerText = s.views ?? 0;
+  document.getElementById('dwell').innerText = s.avg_dwell_ms ?? 0;
+  document.getElementById('clicks').innerText = s.clicks ?? 0;
+
+  const buttons = await fetch(api + '/top-buttons' + qs).then(r=>r.json());
+  const tb = document.querySelector('#tb tbody'); tb.innerHTML='';
+  buttons.forEach(b=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${b.button_id||'(unknown)'}</td><td>${b.clicks}</td>`;
+    tb.appendChild(tr);
+  });
+
+  const products = await fetch(api + '/top-products' + qs).then(r=>r.json());
+  const tp = document.querySelector('#tp tbody'); tp.innerHTML='';
+  products.forEach(p=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML = `<td>${p.product_handle}</td><td>${p.views}</td><td>${p.avg_dwell_ms??0}</td>`;
+    tp.appendChild(tr);
+  });
+}
+document.getElementById('load').onclick = load;
+load();
+</script>
+</body>
+</html>
