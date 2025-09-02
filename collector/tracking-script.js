@@ -11,6 +11,9 @@
     debug: true
   };
 
+  // Event counter for debugging
+  let eventCounter = 0;
+
   // Utility functions
   function log(...args) {
     if (CONFIG.debug) console.log('[HRL Tracking]', ...args);
@@ -38,6 +41,7 @@
   }
 
   function sendEvent(eventName, data = {}) {
+    eventCounter++;
     const payload = {
       shopId: CONFIG.shopId,
       event: eventName,
@@ -48,11 +52,12 @@
         referrer: document.referrer,
         userAgent: navigator.userAgent,
         timestamp: Date.now(),
+        eventCounter: eventCounter,
         ...data.extra
       }
     };
 
-    log('Sending event:', payload);
+    log(`Sending event #${eventCounter}:`, payload);
 
     // Fetch ile gönder
     fetch(CONFIG.apiUrl, {
