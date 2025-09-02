@@ -4,3 +4,4 @@ node_modules
 .DS_Store
 .git
 collector/node_modules
+test-server.js

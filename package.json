@@ -5,7 +5,7 @@
   "scripts": {
     "prestart": "node collector/migrate.js",
     "start": "node collector/server.js",
-    "build": "npm install",
+    "start:test": "node test-server.js",
     "dev": "node collector/server.js"
   },
   "dependencies": {
@@ -16,6 +16,7 @@
     "ua-parser-js": "^1.0.39"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18",
+    "npm": ">=8"
   }
 }
