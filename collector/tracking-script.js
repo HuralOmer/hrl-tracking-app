@@ -136,16 +136,10 @@
     });
   }
 
-  // Product view tracking
+  // Product view tracking - kaldırıldı (page_view_start zaten var)
   function trackProductView() {
-    if (getProductHandle()) {
-      sendEvent('product_view', {
-        extra: {
-          productHandle: getProductHandle(),
-          productTitle: document.querySelector('h1')?.textContent?.trim()
-        }
-      });
-    }
+    // Product view tracking kaldırıldı - page_view_start yeterli
+    // Çünkü her product page'de zaten page_view_start event'i gönderiliyor
   }
 
   // Initialize tracking
