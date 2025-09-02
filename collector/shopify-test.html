@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopify Test Store - Product Page</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .product-header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .product-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            padding: 40px;
+        }
+        .product-image {
+            background: #ecf0f1;
+            height: 400px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #7f8c8d;
+        }
+        .product-info h1 {
+            margin: 0 0 20px 0;
+            color: #2c3e50;
+        }
+        .price {
+            font-size: 24px;
+            font-weight: bold;
+            color: #e74c3c;
+            margin: 20px 0;
+        }
+        .buttons {
+            display: flex;
+            gap: 15px;
+            margin: 30px 0;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #229954;
+        }
+        .btn-warning {
+            background: #f39c12;
+            color: white;
+        }
+        .btn-warning:hover {
+            background: #e67e22;
+        }
+        .quantity-selector {
+            margin: 20px 0;
+        }
+        .quantity-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        .quantity-selector select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .cart-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-top: 1px solid #dee2e6;
+        }
+        .cart-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .cart-item:last-child {
+            border-bottom: none;
+        }
+        .debug-panel {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .debug-panel h3 {
+            margin: 0 0 15px 0;
+        }
+        .debug-log {
+            background: #34495e;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <!-- Shopify benzeri global değişkenler -->
+    <script>
+        window.Shopify = {
+            shop: 'test-shop.myshopify.com',
+            product: {
+                handle: 'black-mug',
+                title: 'Siyah Kahve Fincanı',
+                price: 2999,
+                currency: 'TRY'
+            }
+        };
+    </script>
+
+    <div class="container">
+        <div class="product-header">
+            <h1>🛍️ Shopify Test Store</h1>
+            <p>HRL Tracking Test Sayfası</p>
+        </div>
+
+        <div class="product-content">
+            <div class="product-image">
+                📸 Ürün Fotoğrafı<br>
+                <small>Siyah Kahve Fincanı</small>
+            </div>
+
+            <div class="product-info">
+                <h1 id="product-title">Siyah Kahve Fincanı</h1>
+                <div class="price">₺29,99</div>
+                
+                <div class="quantity-selector">
+                    <label for="quantity">Miktar:</label>
+                    <select id="quantity" name="quantity">
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </div>
+
+                <div class="buttons">
+                    <button class="btn btn-primary add-to-cart" id="add-to-cart">
+                        🛒 Sepete Ekle
+                    </button>
+                    <button class="btn btn-success buy-now" id="buy-now">
+                        💳 Hemen Satın Al
+                    </button>
+                    <button class="btn btn-warning" id="wishlist">
+                        ❤️ Favorilere Ekle
+                    </button>
+                </div>
+
+                <div class="cart-section">
+                    <h3>Sepet İçeriği</h3>
+                    <div class="cart-item">
+                        <span>Siyah Kahve Fincanı</span>
+                        <span>₺29,99</span>
+                    </div>
+                    <div class="cart-item">
+                        <strong>Toplam</strong>
+                        <strong>₺29,99</strong>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="debug-panel">
+            <h3>🔍 HRL Tracking Debug</h3>
+            <div class="debug-log" id="debug-log">
+                Tracking başlatılıyor...<br>
+            </div>
+        </div>
+    </div>
+
+    <!-- HRL Tracking Script -->
+    <script src="tracking-script.js"></script>
+
+    <!-- Debug script -->
+    <script>
+        // Debug log'ları göster
+        const debugLog = document.getElementById('debug-log');
+        const originalLog = window.HRLTracking?.log;
+        
+        if (window.HRLTracking) {
+            window.HRLTracking.config.debug = true;
+            window.HRLTracking.log = function(...args) {
+                const timestamp = new Date().toLocaleTimeString();
+                debugLog.innerHTML += `[${timestamp}] ${args.join(' ')}<br>`;
+                debugLog.scrollTop = debugLog.scrollHeight;
+            };
+        }
+
+        // Test butonları
+        document.getElementById('add-to-cart').addEventListener('click', () => {
+            console.log('Add to cart clicked');
+        });
+
+        document.getElementById('buy-now').addEventListener('click', () => {
+            console.log('Buy now clicked');
+        });
+
+        document.getElementById('wishlist').addEventListener('click', () => {
+            console.log('Wishlist clicked');
+        });
+
+        // Quantity change
+        document.getElementById('quantity').addEventListener('change', (e) => {
+            console.log('Quantity changed to:', e.target.value);
+        });
+    </script>
+</body>
+</html>
