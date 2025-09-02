@@ -209,10 +209,7 @@
         </div>
     </div>
 
-    <!-- HRL Tracking Script -->
-    <script src="tracking-script.js"></script>
-
-    <!-- Debug script -->
+    <!-- Debug script - tracking script'ten önce -->
     <script>
         // Debug log'ları göster
         const debugLog = document.getElementById('debug-log');
@@ -241,6 +238,10 @@
         
         // Sayfa yüklendikten sonra debug'ı kur
         setTimeout(setupDebugLogging, 500);
+    </script>
+
+    <!-- HRL Tracking Script -->
+    <script src="tracking-script.js"></script>
 
         // Test butonları
         document.getElementById('add-to-cart').addEventListener('click', () => {
