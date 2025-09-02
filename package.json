@@ -4,12 +4,16 @@
   "private": true,
   "scripts": {
     "prestart": "node collector/migrate.js",
-    "start": "node collector/server.js"
+    "start": "node collector/server.js",
+    "build": "npm install",
+    "dev": "node collector/server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
     "express": "^4.21.2",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "ua-parser-js": "^1.0.39"
   },
   "engines": {
     "node": ">=18"
