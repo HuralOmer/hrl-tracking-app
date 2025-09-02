@@ -216,16 +216,31 @@
     <script>
         // Debug log'ları göster
         const debugLog = document.getElementById('debug-log');
-        const originalLog = window.HRLTracking?.log;
         
-        if (window.HRLTracking) {
-            window.HRLTracking.config.debug = true;
-            window.HRLTracking.log = function(...args) {
-                const timestamp = new Date().toLocaleTimeString();
-                debugLog.innerHTML += `[${timestamp}] ${args.join(' ')}<br>`;
-                debugLog.scrollTop = debugLog.scrollHeight;
-            };
+        // HRLTracking objesi yüklenene kadar bekle
+        function setupDebugLogging() {
+            if (window.HRLTracking) {
+                window.HRLTracking.config.debug = true;
+                const originalLog = window.HRLTracking.log;
+                
+                window.HRLTracking.log = function(...args) {
+                    const timestamp = new Date().toLocaleTimeString();
+                    debugLog.innerHTML += `[${timestamp}] ${args.join(' ')}<br>`;
+                    debugLog.scrollTop = debugLog.scrollHeight;
+                    
+                    // Orijinal log'u da çağır
+                    if (originalLog) originalLog.apply(this, args);
+                };
+                
+                debugLog.innerHTML += `[${new Date().toLocaleTimeString()}] Debug logging aktif!<br>`;
+            } else {
+                // HRLTracking henüz yüklenmemiş, tekrar dene
+                setTimeout(setupDebugLogging, 100);
+            }
         }
+        
+        // Sayfa yüklendikten sonra debug'ı kur
+        setTimeout(setupDebugLogging, 500);
 
         // Test butonları
         document.getElementById('add-to-cart').addEventListener('click', () => {
