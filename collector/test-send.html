@@ -3,144 +3,155 @@
 <head>
   <meta charset="utf-8" />
   <title>Collector Test (GÜNCEL)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 20px; }
-    input, button { padding: 8px 10px; font-size: 14px; }
-    .row { margin: 8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    #log { background:#0b1020; color:#f2f5ff; padding:14px; border-radius:8px; min-height:160px; white-space:pre-wrap; }
-    .ok { color:#8fffa8 }
-    .err { color:#ff7a7a }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; padding: 16px; }
+    input, button { padding: 6px 10px; font-size: 14px; }
+    .row { margin: 8px 0; display:flex; gap:8px; flex-wrap:wrap; }
+    .log { background:#0b1120; color:#e5e7eb; padding:12px; border-radius:8px; min-height:220px; white-space:pre-wrap; }
+    .ok { color:#34d399; }
+    .err { color:#f87171; }
   </style>
 </head>
 <body>
   <h1>Collector Test (GÜNCEL)</h1>
 
   <div class="row">
-    <b>Endpoint:</b>
-    <input id="endpoint" size="48" value="https://hrl-tracking-app-production-9cbc.up.railway.app">
+    <label>Endpoint:</label>
+    <input id="endpoint" size="55"
+           value="https://hrl-tracking-app-production-9cbc.up.railway.app" />
   </div>
 
   <div class="row">
-    <b>Shop ID:</b>
-    <input id="shopId" size="28" value="dev-shop.myshopify.com">
-    <span style="margin-left:16px"><b>Product handle:</b></span>
-    <input id="productHandle" size="18" value="black-mug">
+    <label>Shop ID:</label>
+    <input id="shopId" size="30" value="dev-shop.myshopify.com" />
+    <label>Product handle:</label>
+    <input id="productHandle" size="20" value="black-mug" />
   </div>
 
   <div class="row">
-    <button id="btnPvs">page_view_start (otomatik de gönderilir)</button>
-    <button id="btnPve">page_view_end (fetch)</button>
-    <button id="btnPveBeacon">page_view_end (sendBeacon)</button>
+    <button id="btnStartAuto">page_view_start (otomatik de gönderilir)</button>
+    <button id="btnEndFetch">page_view_end (fetch)</button>
+    <button id="btnEndBeacon">page_view_end (sendBeacon)</button>
   </div>
 
   <div class="row">
     <button id="btnAddToCart">click (add-to-cart)</button>
-    <button id="btnDoubleClick">click x2 (await, 200ms ara)</button>
-    <span><b>Özel button_id:</b></span>
-    <input id="customButton" size="12" value="buy-now">
-    <button id="btnCustomClick">click (özel)</button>
+    <button id="btnClickTwice">click x2 (await, 200ms ara)</button>
+    <label>Özel button_id:</label>
+    <input id="customBtn" size="16" value="buy-now" />
+    <button id="btnCustom">click (özel)</button>
   </div>
 
-  <div id="log"></div>
+  <div class="log" id="log"></div>
 
   <script>
-    const $ = s => document.querySelector(s);
-    const endpointInput = $('#endpoint');
-    const shopInput = $('#shopId');
-    const handleInput = $('#productHandle');
-    const customButtonInput = $('#customButton');
-    const log = $('#log');
-
-    function baseUrl() {
-      return endpointInput.value.replace(/\/+$/, ''); // sondaki / temizle
-    }
-    function logLine(txt, ok=false) {
-      const span = document.createElement('div');
+    const $ = sel => document.querySelector(sel);
+    const log = (msg, ok=false) => {
+      const el = $('#log');
+      const line = (ok ? '✓ ' : '✗ ') + msg + '\n';
+      const span = document.createElement('span');
       span.className = ok ? 'ok' : 'err';
-      span.textContent = (ok ? '✓ ' : '✗ ') + txt;
-      log.append(span);
-      log.append(document.createElement('br'));
-      log.scrollTop = log.scrollHeight;
+      span.textContent = line;
+      el.appendChild(span);
+      el.scrollTop = el.scrollHeight;
+    };
+
+    const ep = () => $('#endpoint').value.replace(/\/+$/, '');
+    const collectUrl = () => ep() + '/collect';        // Sunucudaki POST endpoint
+    const apiCollectUrl = () => ep() + '/api/collect'; // Yedek endpoint
+
+    async function postJSON(url, payload) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'include',
+        mode: 'cors',
+      });
+      return res;
     }
 
-    async function postCollect(payload) {
-      const url = baseUrl() + '/collect';
-      const body = {
-        shopId: shopInput.value.trim(),
-        ...payload,                        // event zorunlu burada gelmeli
-        productHandle: handleInput.value.trim() || undefined,
-      };
-
-      logLine(`fetch sent ${JSON.stringify(body)}`);
+    async function sendEvent(payload) {
       try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          credentials: 'omit',
-        });
-        const json = await res.json().catch(() => ({}));
-        if (res.ok && json.ok) {
-          logLine(`response ${res.status}: ${JSON.stringify(json)}`, true);
-        } else {
-          logLine(`response ${res.status}: ${JSON.stringify(json)}`);
+        // Önce /collect
+        let res = await postJSON(collectUrl(), payload);
+        if (res.ok) {
+          log(`response ${res.status}: ${await res.text()}`, true);
+          return;
         }
+        // Olmazsa /api/collect
+        log(`response ${res.status} on /collect, trying /api/collect...`);
+        res = await postJSON(apiCollectUrl(), payload);
+        const ok = res.ok;
+        const body = await res.text();
+        log(`response ${res.status} (/api/collect): ${body}`, ok);
       } catch (e) {
-        logLine(`network error: ${e.message}`);
+        log(`fetch error: ${e.message}`);
       }
     }
 
-    function beaconCollect(payload) {
-      const url = baseUrl() + '/collect';
-      const data = new URLSearchParams();
-      data.set('shopId', shopInput.value.trim());
-      Object.entries(payload).forEach(([k,v]) => {
-        if (typeof v === 'object') data.set(k, JSON.stringify(v));
-        else data.set(k, String(v));
-      });
-
-      const ok = navigator.sendBeacon(url, data);
-      if (ok) logLine(`beacon sent ${JSON.stringify(Object.fromEntries(data))}`, true);
-      else logLine('beacon failed to enqueue');
+    function beacon(payload) {
+      try {
+        const ok = navigator.sendBeacon(collectUrl(), new Blob(
+          [JSON.stringify(payload)], { type:'text/plain' }
+        ));
+        if (!ok) {
+          // sendBeacon başarısızsa fetch’e düş
+          sendEvent(payload);
+          return;
+        }
+        log(`beacon sent ${JSON.stringify(payload)}`, true);
+      } catch (e) {
+        log(`beacon error: ${e.message}`);
+      }
     }
 
-    // Butonlar
-    $('#btnPvs').onclick = () => postCollect({
-      event: 'page_view_start',
-      extra: { route: 'product' },
+    const basePayload = (extra={}) => ({
+      shopId: $('#shopId').value.trim(),
+      productHandle: $('#productHandle').value.trim(),
+      ...extra
     });
 
-    $('#btnPve').onclick = () => postCollect({
-      event: 'page_view_end',
-      extra: { reason: 'manual' },
-    });
-
-    $('#btnPveBeacon').onclick = () => beaconCollect({
-      event: 'page_view_end',
-      extra: { reason: 'beacon' },
-    });
-
-    $('#btnAddToCart').onclick = () => postCollect({
-      event: 'click',
-      buttonId: 'add-to-cart',
-    });
-
-    $('#btnDoubleClick').onclick = async () => {
-      await postCollect({ event: 'click', buttonId: 'add-to-cart' });
-      await new Promise(r => setTimeout(r, 200));
-      await postCollect({ event: 'click', buttonId: 'add-to-cart' });
+    // UI handlers
+    $('#btnStartAuto').onclick = () => {
+      const p = basePayload({ event:'page_view_start', extra:{ route:'product' } });
+      log(`fetch sent ${JSON.stringify(p)}`);
+      sendEvent(p);
     };
 
-    $('#btnCustomClick').onclick = () => postCollect({
-      event: 'click',
-      buttonId: customButtonInput.value.trim() || 'buy-now',
-    });
+    $('#btnEndFetch').onclick = () => {
+      const p = basePayload({ event:'page_view_end', extra:{ reason:'manual' } });
+      log(`fetch sent ${JSON.stringify(p)}`);
+      sendEvent(p);
+    };
 
-    // Sayfa açılışında otomatik ilk görüntüleme
-    window.addEventListener('load', () => {
-      postCollect({ event: 'page_view_start', extra: { route: 'product' } });
-    });
+    $('#btnEndBeacon').onclick = () => {
+      const p = basePayload({ event:'page_view_end', extra:{ reason:'beacon' } });
+      beacon(p);
+    };
+
+    $('#btnAddToCart').onclick = () => {
+      const p = basePayload({ event:'click', buttonId:'add-to-cart' });
+      log(`fetch sent ${JSON.stringify(p)}`);
+      sendEvent(p);
+    };
+
+    $('#btnClickTwice').onclick = async () => {
+      const p = basePayload({ event:'click', buttonId:'add-to-cart' });
+      log(`fetch sent ${JSON.stringify(p)}`);
+      await sendEvent(p);
+      await new Promise(r => setTimeout(r, 200));
+      log(`fetch sent ${JSON.stringify(p)}`);
+      await sendEvent(p);
+    };
+
+    $('#btnCustom').onclick = () => {
+      const id = $('#customBtn').value.trim() || 'buy-now';
+      const p = basePayload({ event:'click', buttonId:id });
+      log(`fetch sent ${JSON.stringify(p)}`);
+      sendEvent(p);
+    };
   </script>
 </body>
 </html>
