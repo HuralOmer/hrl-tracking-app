@@ -8,7 +8,7 @@
   const CONFIG = {
     apiUrl: 'https://hrl-tracking-app-production-9cbc.up.railway.app/collect',
     shopId: window.Shopify?.shop || 'unknown-shop',
-    debug: false
+    debug: true
   };
 
   // Utility functions
