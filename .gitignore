@@ -1,2 +1,2 @@
-collector/node_modules/
-collector/.env
+node_modules/
+.env

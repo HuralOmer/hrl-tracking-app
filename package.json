@@ -1,12 +1,19 @@
 {
+  "name": "hrl-tracking-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "prestart": "node collector/migrate.js",
+    "start": "node collector/server.js"
+  },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "morgan": "^1.10.1",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "dotenv": "^16.4.5"
   },
-  "scripts": {
-    "prestart": "node migrate.js",
-    "start": "node collector/server.js"
+  "engines": {
+    "node": ">=18"
   }
 }
