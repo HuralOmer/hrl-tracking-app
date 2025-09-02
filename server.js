@@ -8,23 +8,26 @@ const { Pool } = require('pg');
 const app = express();
 
 // --- Middleware'ler ---
-app.use(cors());
-// Log
-app.use(morgan('tiny'));
+app.use(cors({
+  origin: '*',
+  methods: ['GET','POST','OPTIONS'],
+  allowedHeaders: ['Origin','X-Requested-With','Content-Type','Accept'],
+  credentials: true
+}));
 
-// sendBeacon genelde content-type: text/plain ile gelir; önce raw'ı yakalayalım
+// istek logları (LOG_REQUESTS=1 ise ayrıntılı)
+app.use(morgan(process.env.LOG_REQUESTS ? 'combined' : 'tiny'));
+
+// sendBeacon çoğunlukla text/plain ile gelir; JSON parser'dan ÖNCE yakala
 app.use((req, res, next) => {
-  const ct = req.headers['content-type'] || '';
+  const ct = (req.headers['content-type'] || '').toLowerCase();
   if (req.method === 'POST' && ct.startsWith('text/plain')) {
     let data = '';
     req.setEncoding('utf8');
     req.on('data', chunk => (data += chunk));
     req.on('end', () => {
-      try {
-        req.body = data ? JSON.parse(data) : {};
-      } catch {
-        req.body = {};
-      }
+      try { req.body = data ? JSON.parse(data) : {}; }
+      catch { req.body = {}; }
       next();
     });
   } else {
@@ -32,15 +35,20 @@ app.use((req, res, next) => {
   }
 });
 
-// fetch için JSON parser
+// fetch POST'ları için JSON parser
 app.use(express.json({ limit: '200kb' }));
 
-// test-send.html'i ve diğer statik dosyaları servis et
+// test-send.html vb. statik dosyalar (collector klasörünün kendisi)
 app.use(express.static(path.join(__dirname)));
 
 // --- Sağlık kontrolü ---
-app.get('/health', (_req, res) => {
+app.get(['/health', '/healthz'], (_req, res) => {
   res.json({ ok: true });
+});
+
+// Kök path'e basit bir bilgi (Cannot GET / görmeyelim)
+app.get('/', (_req, res) => {
+  res.type('text/plain').send('HRL collector up. Use POST /collect (or /collector/collect).');
 });
 
 // --- DB (varsa) ---
@@ -53,8 +61,8 @@ if (process.env.DATABASE_URL) {
 }
 
 // --- TOPLAMA ENDPOINT'İ ---
-// Hem /collect hem de /api/collect kabul edilsin
-app.post(['/collect', '/api/collect'], async (req, res) => {
+// >>> Burada /collector/collect de eklendi <<<
+app.post(['/collect', '/api/collect', '/collector/collect'], async (req, res) => {
   const { shopId, event, productHandle, buttonId, extra } = req.body || {};
 
   if (!shopId || !event) {
@@ -63,7 +71,6 @@ app.post(['/collect', '/api/collect'], async (req, res) => {
       .json({ ok: false, error: 'missing_params', required: ['shopId', 'event'] });
   }
 
-  // Kayıt (DB varsa)
   try {
     if (pool) {
       await pool.query(
@@ -85,11 +92,14 @@ app.post(['/collect', '/api/collect'], async (req, res) => {
     return res.json({ ok: true });
   } catch (err) {
     console.error('DB error:', err);
+    if (process.env.DEBUG_ERRORS) {
+      return res.status(500).json({ ok: false, error: 'internal_error', details: String(err) });
+    }
     return res.status(500).json({ ok: false, error: 'internal_error' });
   }
 });
 
-// Yakalanmayan istekler
+// Yakalanmayan istekler hep JSON 404 dönsün
 app.use((req, res) => {
   res
     .status(404)
