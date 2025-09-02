@@ -209,35 +209,39 @@
         </div>
     </div>
 
-    <!-- Debug script - tracking script'ten önce -->
+    <!-- Debug script - basit versiyon -->
     <script>
-        // Debug log'ları göster
         const debugLog = document.getElementById('debug-log');
         
+        function addDebugLog(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            debugLog.innerHTML += `[${timestamp}] ${message}<br>`;
+            debugLog.scrollTop = debugLog.scrollHeight;
+        }
+        
+        // Sayfa yüklendiğinde
+        addDebugLog('Sayfa yüklendi, tracking script bekleniyor...');
+        
         // HRLTracking objesi yüklenene kadar bekle
-        function setupDebugLogging() {
+        function waitForTracking() {
             if (window.HRLTracking) {
+                addDebugLog('HRL Tracking bulundu!');
                 window.HRLTracking.config.debug = true;
-                const originalLog = window.HRLTracking.log;
                 
+                // Orijinal log fonksiyonunu override et
+                const originalLog = window.HRLTracking.log;
                 window.HRLTracking.log = function(...args) {
-                    const timestamp = new Date().toLocaleTimeString();
-                    debugLog.innerHTML += `[${timestamp}] ${args.join(' ')}<br>`;
-                    debugLog.scrollTop = debugLog.scrollHeight;
-                    
-                    // Orijinal log'u da çağır
+                    addDebugLog(args.join(' '));
                     if (originalLog) originalLog.apply(this, args);
                 };
                 
-                debugLog.innerHTML += `[${new Date().toLocaleTimeString()}] Debug logging aktif!<br>`;
+                addDebugLog('Debug logging aktif!');
             } else {
-                // HRLTracking henüz yüklenmemiş, tekrar dene
-                setTimeout(setupDebugLogging, 100);
+                setTimeout(waitForTracking, 100);
             }
         }
         
-        // Sayfa yüklendikten sonra debug'ı kur
-        setTimeout(setupDebugLogging, 500);
+        setTimeout(waitForTracking, 1000);
     </script>
 
     <!-- HRL Tracking Script -->
@@ -248,19 +252,23 @@
         // Test butonları
         document.getElementById('add-to-cart').addEventListener('click', () => {
             console.log('Add to cart clicked');
+            addDebugLog('Add to cart butonuna tıklandı');
         });
 
         document.getElementById('buy-now').addEventListener('click', () => {
             console.log('Buy now clicked');
+            addDebugLog('Buy now butonuna tıklandı');
         });
 
         document.getElementById('wishlist').addEventListener('click', () => {
             console.log('Wishlist clicked');
+            addDebugLog('Wishlist butonuna tıklandı');
         });
 
         // Quantity change
         document.getElementById('quantity').addEventListener('change', (e) => {
             console.log('Quantity changed to:', e.target.value);
+            addDebugLog(`Miktar değiştirildi: ${e.target.value}`);
         });
     </script>
 </body>
