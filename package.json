@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "prestart": "node collector/migrate.js",
-    "start": "node collector/server.js",
+    "start": "node test-server.js",
+    "start:full": "node collector/server.js",
     "start:test": "node test-server.js",
     "dev": "node collector/server.js"
   },
