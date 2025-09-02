@@ -5,6 +5,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { Pool } = require('pg');
+const statsRoutes = require('./stats-routes');
 
 const app = express();
 
@@ -44,6 +45,9 @@ if (process.env.LOG_REQUESTS === '1') {
 
 // test-send.html ve statikleri servis et (collector klasörü)
 app.use(express.static(path.join(__dirname)));
+
+// Stats API routes
+app.use('/stats', statsRoutes);
 
 // Sağlık uçları
 app.get(['/', '/health', '/healthz', '/ready'], (_req, res) => {
