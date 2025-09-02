@@ -86,9 +86,9 @@ app.post(COLLECT_PATHS, async (req, res) => {
   try {
     if (pool) {
       await pool.query(
-        `insert into hrl_events (shop_id, event, product_handle, button_id, extra_json, created_at)
-         values ($1,$2,$3,$4,$5, now())`,
-        [record.shopId, record.event, record.productHandle, record.buttonId, record.extra ? JSON.stringify(record.extra) : null]
+        `insert into events (shop_id, event_name, product_handle, payload, ts)
+         values ($1,$2,$3,$4, now())`,
+        [record.shopId, record.event, record.productHandle, record.extra ? JSON.stringify(record.extra) : null]
       );
     } else {
       // DB yoksa en azından loglayalım
