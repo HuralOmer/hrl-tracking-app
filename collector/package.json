@@ -4,9 +4,9 @@
   "private": true,
   "scripts": {
     "prestart": "node migrate.js",
-    "start": "node ../test-server.js",
+    "start": "node test-server.js",
     "start:full": "node server.js",
-    "start:test": "node ../test-server.js",
+    "start:test": "node test-server.js",
     "dev": "node server.js"
   },
   "dependencies": {
