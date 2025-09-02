@@ -1,29 +1,26 @@
 // collector/server.js
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
-const morgan = require('morgan');
 const path = require('path');
 const { Pool } = require('pg');
 
 const app = express();
-app.set('trust proxy', 1);
 
-// --- Ayarlar / Log ---
-const LOG_REQUESTS = String(process.env.LOG_REQUESTS || '0') === '1';
+// Proxy arkasında gerçek IP
+app.set('trust proxy', true);
+
+// Basit CORS
 app.use(cors());
-app.use(morgan('tiny'));
-app.use((req, _res, next) => {
-  if (LOG_REQUESTS) console.log(`[REQ] ${req.method} ${req.originalUrl}`);
-  next();
-});
 
-// sendBeacon genelde text/plain → önce onu yakala
+// sendBeacon -> content-type: text/plain gelebilir; önce onu yakalayalım
 app.use((req, res, next) => {
   const ct = req.headers['content-type'] || '';
   if (req.method === 'POST' && ct.startsWith('text/plain')) {
     let data = '';
     req.setEncoding('utf8');
-    req.on('data', chunk => (data += chunk));
+    req.on('data', (c) => (data += c));
     req.on('end', () => {
       try { req.body = data ? JSON.parse(data) : {}; }
       catch { req.body = {}; }
@@ -34,88 +31,88 @@ app.use((req, res, next) => {
   }
 });
 
-// JSON / form parser
+// JSON body
 app.use(express.json({ limit: '200kb' }));
-app.use(express.urlencoded({ extended: false }));
 
-// --- Sağlık & kök ---
-app.get('/health', (_req, res) => res.json({ ok: true }));
-app.get('/', (_req, res) =>
-  res.json({
-    ok: true,
-    service: 'collector',
-    routes: ['POST /collect', 'POST /collector/collect', 'GET /stats/*', 'GET /test-send.html']
-  })
-);
+// İsteğe bağlı basit log (morgan yoksa crash etmesin)
+if (process.env.LOG_REQUESTS === '1') {
+  app.use((req, _res, next) => {
+    console.log(`[req] ${req.method} ${req.path}`);
+    next();
+  });
+}
 
-// --- DB ---
+// test-send.html ve statikleri servis et (collector klasörü)
+app.use(express.static(path.join(__dirname)));
+
+// Sağlık uçları
+app.get(['/', '/health', '/healthz', '/ready'], (_req, res) => {
+  res.json({ ok: true, message: 'collector alive', time: new Date().toISOString() });
+});
+
+// --- DB havuzu (opsiyonel) ---
 let pool = null;
 if (process.env.DATABASE_URL) {
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
+    ssl: { rejectUnauthorized: false }
   });
-  pool.on('error', (err) => console.error('PG pool error:', err));
 }
 
-async function saveEvent({ shopId, event, productHandle, buttonId, extra }) {
-  if (!pool) return;
-  await pool.query(
-    `insert into hrl_events
-     (shop_id, event, product_handle, button_id, extra_json, created_at)
-     values ($1,$2,$3,$4,$5, now())`,
-    [
-      shopId,
-      event,
-      productHandle || null,
-      buttonId || null,
-      extra ? JSON.stringify(extra) : null,
-    ]
-  );
-}
+// --- Veri toplama uçları ---
+// Geriye dönük uyumluluk için 3 yol da açık:
+const COLLECT_PATHS = ['/collect', '/api/collect', '/collector/collect'];
 
-// --- Toplama endpoint'i (çoklu path) ---
-const collectHandler = async (req, res, next) => {
+app.post(COLLECT_PATHS, async (req, res) => {
+  const { shopId, event, productHandle, buttonId, extra } = req.body || {};
+
+  if (!shopId || !event) {
+    return res.status(400).json({
+      ok: false,
+      error: 'missing_params',
+      required: ['shopId', 'event']
+    });
+  }
+
+  const record = {
+    shopId,
+    event,
+    productHandle: productHandle || null,
+    buttonId: buttonId || null,
+    extra: extra || null,
+    ip: req.ip
+  };
+
   try {
-    const { shopId, event, productHandle, buttonId, extra } = req.body || {};
-    if (!shopId || !event) {
-      return res.status(400).json({ ok: false, error: 'missing_params', required: ['shopId', 'event'] });
+    if (pool) {
+      await pool.query(
+        `insert into hrl_events (shop_id, event, product_handle, button_id, extra_json, created_at)
+         values ($1,$2,$3,$4,$5, now())`,
+        [record.shopId, record.event, record.productHandle, record.buttonId, record.extra ? JSON.stringify(record.extra) : null]
+      );
+    } else {
+      // DB yoksa en azından loglayalım
+      console.log('EVENT (no-db):', record);
     }
-    await saveEvent({ shopId, event, productHandle, buttonId, extra });
     return res.json({ ok: true });
   } catch (err) {
-    console.error('collect error:', err);
-    next(err);
+    console.error('DB error:', err);
+    return res.status(500).json({ ok: false, error: 'internal_error' });
   }
-};
-
-// Geriye dönük uyumluluk için tüm yollar:
-app.post(['/collect', '/api/collect', '/collector/collect'], collectHandler);
-
-// --- Stats (varsa) ---
-try {
-  const statsRoutes = require('./stats-routes');
-  app.use('/stats', statsRoutes);
-} catch (e) {
-  console.log('Stats routes not loaded:', e.message);
-}
-
-// --- Statik test sayfası ---
-app.use(express.static(path.join(__dirname)));
-
-// 404 JSON
-app.use((req, res) => {
-  res.status(404).json({ ok: false, error: 'not_found', method: req.method, path: req.originalUrl });
 });
 
-// 500 JSON
+// 404'leri JSON döndür
+app.use((req, res) => {
+  res.status(404).json({ ok: false, error: 'not_found', method: req.method, path: req.path });
+});
+
+// Hata yakalayıcı
 app.use((err, _req, res, _next) => {
   console.error('Unhandled error:', err);
-  res.status(500).json({ ok: false, error: 'internal_error' });
+  res.status(500).json({ ok: false, error: 'unhandled' });
 });
 
-// --- Sunucu ---
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, () => {
   console.log(`Collector listening on http://localhost:${PORT}`);
 });
