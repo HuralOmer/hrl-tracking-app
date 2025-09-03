@@ -9,6 +9,22 @@ const statsRoutes = require('./stats-routes');
 
 const app = express();
 
+// --- Basit in-memory dedup (kısa TTL) ---
+const DEDUP_TTL_MS = 1500; // 1.5 saniye
+const dedupCache = new Map();
+function dedupKey({ shopId, event, productHandle, buttonId }, ip) {
+  return [shopId, event, productHandle || '', buttonId || '', ip || ''].join('|');
+}
+function dedupCheckAndMark(key) {
+  const now = Date.now();
+  for (const [k, t] of dedupCache) {
+    if (now - t > DEDUP_TTL_MS) dedupCache.delete(k);
+  }
+  const last = dedupCache.get(key);
+  dedupCache.set(key, now);
+  return Boolean(last) && (now - last < DEDUP_TTL_MS);
+}
+
 // Proxy arkasında gerçek IP
 app.set('trust proxy', true);
 
@@ -76,6 +92,16 @@ app.post(COLLECT_PATHS, async (req, res) => {
       error: 'missing_params',
       required: ['shopId', 'event']
     });
+  }
+
+  // Dedup koruması: aynı anahtardan kısa sürede tekrar gelirse atla
+  try {
+    const key = dedupKey({ shopId, event, productHandle, buttonId }, req.ip);
+    if (dedupCheckAndMark(key)) {
+      return res.json({ ok: true, dedup: true });
+    }
+  } catch (_e) {
+    // sessiz geç; dedup hatası olsa bile ana akışa devam edelim
   }
 
   const record = {
