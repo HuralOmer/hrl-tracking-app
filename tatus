@@ -1,0 +1,3 @@
+[33m7288c44[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Add embedded /admin shell and OAuth skeleton (/auth, /auth/callback) + CSP for Shopify iframe
+[33m4e56d7f[m Add in-memory dedup (1.5s) on /collect to prevent double counts
+[33m6f85a7d[m Stop double-send: remove sendBeacon from sendEvent; use sendBeacon only for page_view_end with keepalive fetch fallback

@@ -37,7 +37,7 @@ app.use((req, res, next) => {
   if (req.path.startsWith('/admin') || req.path.startsWith('/auth') || req.path === '/dashboard.html') {
     res.setHeader(
       'Content-Security-Policy',
-      "default-src 'self' https:; frame-ancestors https://admin.shopify.com https://*.myshopify.com; script-src 'self' https: 'unsafe-inline'; style-src 'self' https: 'unsafe-inline'"
+      "default-src 'self' https:; frame-ancestors 'self' https://admin.shopify.com https://*.myshopify.com; script-src 'self' https: 'unsafe-inline'; style-src 'self' https: 'unsafe-inline'"
     );
     // XFO: Shopify (cross-origin) ve kendi iç iframe için engelleme olmasın
     res.setHeader('X-Frame-Options', 'ALLOWALL');
