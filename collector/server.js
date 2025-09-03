@@ -167,6 +167,15 @@ app.get('/admin', (req, res) => {
         });
       })();
       document.getElementById('app').innerHTML = 'Loading...';
+      // Dashboard'tan 'hrl:loaded' mesajı gelirse header'ı temizle
+      window.addEventListener('message', function(ev){
+        try {
+          if (ev && ev.data && ev.data.type === 'hrl:loaded') {
+            var el = document.getElementById('app');
+            if (el) el.textContent = '';
+          }
+        } catch(e){}
+      });
     })();
   </script>
 </body>
