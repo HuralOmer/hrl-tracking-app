@@ -84,11 +84,19 @@ app.get('/admin', (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Hrl Store Tracker — Admin</title>
   <script src="https://unpkg.com/@shopify/app-bridge@3"></script>
-  <style>body{font-family:system-ui,Arial;padding:24px}</style>
+  <style>
+    body{font-family:system-ui,Arial;margin:0;padding:0;background:#fff}
+    header{padding:20px 24px;border-bottom:1px solid #eee}
+    .frame{position:fixed;top:64px;left:0;right:0;bottom:0;border:0;width:100%;height:calc(100vh - 64px)}
+    .hint{color:#666;font-size:14px}
+  </style>
 </head>
 <body>
-  <h1>Hrl Store Tracker — Admin</h1>
-  <div id="app">Loading...</div>
+  <header>
+    <h1 style="margin:0">Hrl Store Tracker — Admin</h1>
+    <div class="hint" id="app">Loading...</div>
+  </header>
+  <iframe class="frame" src="/dashboard.html" title="Dashboard"></iframe>
   <script>
     (function(){
       var apiKey = ${JSON.stringify(apiKey)};
@@ -104,7 +112,7 @@ app.get('/admin', (req, res) => {
       if (AppBridge) {
         window.appBridge = AppBridge({ apiKey: apiKey, host: host, forceRedirect: true });
       }
-      document.getElementById('app').innerHTML = '<p>Embedded dashboard yakında burada. Geçici olarak <a href="/dashboard.html" target="_blank">harici dashboard</a>.</p>';
+      document.getElementById('app').innerHTML = 'Embedded dashboard yüklendi.';
     })();
   </script>
 </body>
