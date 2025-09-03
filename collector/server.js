@@ -6,6 +6,8 @@ const cors = require('cors');
 const path = require('path');
 const { Pool } = require('pg');
 const statsRoutes = require('./stats-routes');
+const crypto = require('crypto');
+const fetch = require('node-fetch');
 
 const app = express();
 
@@ -138,11 +140,61 @@ app.get('/auth', (req, res) => {
 });
 
 // OAuth callback (yalın doğrulama alanı için iskelet)
-app.get('/auth/callback', (req, res) => {
-  // Not: Üretimde HMAC doğrulaması ve access token değişimi yapılmalı
-  // Şimdilik sadece admin shell'e yönlendiriyoruz
-  const { host } = req.query;
-  return res.redirect(`/admin?host=${encodeURIComponent(host || '')}`);
+app.get('/auth/callback', async (req, res) => {
+  try {
+    const { shop, code, hmac, host } = req.query;
+    if (!shop || !code || !hmac) {
+      return res.status(400).send('missing params');
+    }
+
+    // HMAC doğrulama
+    const params = { ...req.query };
+    delete params.signature;
+    delete params.hmac;
+    const message = Object.keys(params)
+      .sort()
+      .map((k) => `${k}=${params[k]}`)
+      .join('&');
+    const generated = crypto
+      .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
+      .update(message)
+      .digest('hex');
+    if (generated !== hmac) {
+      return res.status(400).send('invalid hmac');
+    }
+
+    // Access token al
+    const tokenResp = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: process.env.SHOPIFY_API_KEY,
+        client_secret: process.env.SHOPIFY_API_SECRET,
+        code
+      })
+    });
+    const tokenJson = await tokenResp.json();
+    const accessToken = tokenJson.access_token;
+    const scopeStr = tokenJson.scope;
+    if (!accessToken) {
+      return res.status(500).send('token exchange failed');
+    }
+
+    // DB'ye kaydet (varsa güncelle)
+    if (pool) {
+      await pool.query(
+        `insert into shop_tokens (shop_domain, access_token, scopes, created_at)
+         values ($1,$2,$3, now())
+         on conflict (shop_domain) do update set access_token = excluded.access_token, scopes = excluded.scopes`,
+        [shop, accessToken, scopeStr]
+      );
+    }
+
+    return res.redirect(`/admin?host=${encodeURIComponent(host || '')}`);
+  } catch (err) {
+    console.error('OAuth callback error:', err);
+    return res.status(500).send('oauth_error');
+  }
 });
 
 // Stats API routes

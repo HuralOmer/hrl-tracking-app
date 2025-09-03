@@ -31,3 +31,11 @@ create table if not exists product_cache (
   updated_at timestamptz,
   primary key (shop_id, handle)
 );
+
+-- shopify mağaza access tokenları
+create table if not exists shop_tokens (
+  shop_domain text primary key,
+  access_token text not null,
+  scopes text,
+  created_at timestamptz default now()
+);
