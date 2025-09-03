@@ -33,6 +33,12 @@
         <button onclick="testStats()">Test /stats/summary</button>
         <div id="stats-result" class="result"></div>
     </div>
+    
+    <div class="test-section">
+        <h3>4. Cleanup Test</h3>
+        <button onclick="testCleanup()">Cleanup Product View Events</button>
+        <div id="cleanup-result" class="result"></div>
+    </div>
 
     <script>
         const API_BASE = 'https://hrl-tracking-app-production-9cbc.up.railway.app';
@@ -93,7 +99,7 @@
         
         async function testStats() {
             try {
-                const response = await fetch(`${API_BASE}/stats/summary?shopId=test-shop.myshopify.com`);
+                const response = await fetch(`${API_BASE}/stats/summary?shopId=dev-shop.myshopify.com`);
                 const data = await response.json();
                 
                 if (response.ok) {
@@ -103,6 +109,28 @@
                 }
             } catch (error) {
                 showResult('stats-result', false, `Network hatası: ${error.message}`);
+            }
+        }
+        
+        async function testCleanup() {
+            try {
+                const response = await fetch(`${API_BASE}/stats/cleanup`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ shopId: 'dev-shop.myshopify.com' })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult('cleanup-result', true, 'Cleanup başarılı', data);
+                } else {
+                    showResult('cleanup-result', false, `HTTP ${response.status}: ${data.error || 'Bilinmeyen hata'}`, data);
+                }
+            } catch (error) {
+                showResult('cleanup-result', false, `Network hatası: ${error.message}`);
             }
         }
         
