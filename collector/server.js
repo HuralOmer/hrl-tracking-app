@@ -49,6 +49,9 @@ app.use((req, res, next) => {
   }
 });
 
+// Webhook'lar için ham body (HMAC doğrulama) - JSON parser'dan ÖNCE
+app.use('/webhooks', express.raw({ type: 'application/json' }));
+
 // JSON body
 app.use(express.json({ limit: '200kb' }));
 
@@ -225,12 +228,14 @@ app.get(['/', '/health', '/healthz', '/ready'], (_req, res) => {
 });
 
 // Webhook alıcısı: app/uninstalled
-app.post('/webhooks/app_uninstalled', express.raw({ type: 'application/json' }), (req, res) => {
+app.post('/webhooks/app_uninstalled', (req, res) => {
   try {
     const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
     const topic = req.get('X-Shopify-Topic');
     const shop = req.get('X-Shopify-Shop-Domain');
-    const body = req.body; // Buffer
+    const bodyBuffer = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
 
     if (topic !== 'app/uninstalled') {
       return res.status(400).send('invalid topic');
@@ -238,7 +243,7 @@ app.post('/webhooks/app_uninstalled', express.raw({ type: 'application/json' }),
 
     const digest = crypto
       .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
-      .update(body)
+      .update(bodyBuffer)
       .digest('base64');
     if (digest !== hmacHeader) {
       return res.status(401).send('invalid hmac');
