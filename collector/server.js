@@ -68,7 +68,7 @@ app.use(express.static(path.join(__dirname)));
 
 // Embedded admin için temel CSP (Shopify admin iframe'i)
 app.use((req, res, next) => {
-  if (req.path.startsWith('/admin') || req.path.startsWith('/auth')) {
+  if (req.path.startsWith('/admin') || req.path.startsWith('/auth') || req.path === '/dashboard.html') {
     res.setHeader(
       'Content-Security-Policy',
       "default-src 'self' https:; frame-ancestors https://admin.shopify.com https://*.myshopify.com; script-src 'self' https: 'unsafe-inline'; style-src 'self' https: 'unsafe-inline'"
