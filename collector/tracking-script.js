@@ -106,7 +106,7 @@
     }
     // heartbeat
     markPing();
-    setInterval(() => { markPing(); sendEvent('visit_heartbeat'); }, 15*1000);
+    setInterval(() => { markPing(); sendEvent('visit_heartbeat'); }, 5*1000);
     
     // Page view end tracking (sayfa kapanırken) — sendBeacon tercih et
     window.addEventListener('beforeunload', () => {
