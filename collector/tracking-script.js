@@ -59,7 +59,7 @@
 
     log(`Sending event #${eventCounter}:`, payload);
 
-    // Fetch ile gönder
+    // Fetch ile gönder (tek kanal)
     fetch(CONFIG.apiUrl, {
       method: 'POST',
       headers: {
@@ -69,23 +69,51 @@
     }).catch(err => {
       log('Error sending event:', err);
     });
-
-    // SendBeacon ile backup (sayfa kapanırken)
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(CONFIG.apiUrl, JSON.stringify(payload));
-    }
   }
 
   // Page view tracking
   function trackPageView() {
     sendEvent('page_view_start');
     
-    // Page view end tracking (sayfa kapanırken)
+    // Page view end tracking (sayfa kapanırken) — sendBeacon tercih et
     window.addEventListener('beforeunload', () => {
       const dwellTime = Date.now() - pageStartTime;
-      sendEvent('page_view_end', {
-        extra: { dwell_ms: dwellTime }
-      });
+      const payload = {
+        shopId: CONFIG.shopId,
+        event: 'page_view_end',
+        productHandle: getProductHandle(),
+        buttonId: null,
+        extra: {
+          url: window.location.href,
+          referrer: document.referrer,
+          userAgent: navigator.userAgent,
+          timestamp: Date.now(),
+          dwell_ms: dwellTime
+        }
+      };
+
+      if (navigator.sendBeacon) {
+        try {
+          const blob = new Blob([JSON.stringify(payload)], { type: 'text/plain' });
+          navigator.sendBeacon(CONFIG.apiUrl, blob);
+        } catch (_e) {
+          // Fallback fetch (sync olmamalı)
+          fetch(CONFIG.apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            keepalive: true,
+            body: JSON.stringify(payload)
+          }).catch(() => {});
+        }
+      } else {
+        // Fallback fetch
+        fetch(CONFIG.apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          keepalive: true,
+          body: JSON.stringify(payload)
+        }).catch(() => {});
+      }
     });
   }
 
