@@ -7,7 +7,6 @@ const path = require('path');
 const { Pool } = require('pg');
 const statsRoutes = require('./stats-routes');
 const crypto = require('crypto');
-const fetch = require('node-fetch');
 
 const app = express();
 
