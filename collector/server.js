@@ -133,10 +133,12 @@ app.get('/admin', (req, res) => {
       if (AppBridge) {
         window.appBridge = AppBridge({ apiKey: apiKey, host: host, forceRedirect: true });
       }
-      // host -> shop domain çözümlemesi (base64 decode + "admin.shopify.com/store/<shop>/apps")
+      // host -> shop domain çözümlemesi (base64url decode + "admin.shopify.com/store/<shop>/apps")
       try {
         if (host) {
-          var decoded = atob(host);
+          var h = host.replace(/-/g,'+').replace(/_/g,'/');
+          while (h.length % 4) h += '=';
+          var decoded = atob(h);
           var m = decoded.match(/store\/([^/?#]+)/);
           var shopPart = m && m[1];
           if (shopPart) {
@@ -156,7 +158,15 @@ app.get('/admin', (req, res) => {
           }
         }
       } catch(e) {}
-      document.getElementById('app').innerHTML = 'Embedded dashboard yüklendi.';
+      // İlk durumda Loading göster; iframe load olduğunda temizlenecek
+      (function(){
+        var f = document.getElementById('dash');
+        f.addEventListener('load', function(){
+          var el = document.getElementById('app');
+          if (el) el.textContent = '';
+        });
+      })();
+      document.getElementById('app').innerHTML = 'Loading...';
     })();
   </script>
 </body>
