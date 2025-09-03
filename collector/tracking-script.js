@@ -5,8 +5,15 @@
   'use strict';
   
   // Configuration
+  const currentSrc = (function(){
+    try { return document.currentScript && document.currentScript.src; } catch(e) { return ''; }
+  })();
+  const inferredApi = (function(){
+    try { return currentSrc ? new URL(currentSrc).origin + '/collect' : 'https://hrl-tracking-app-production-9cbc.up.railway.app/collect'; }
+    catch { return 'https://hrl-tracking-app-production-9cbc.up.railway.app/collect'; }
+  })();
   const CONFIG = {
-    apiUrl: 'https://hrl-tracking-app-production-9cbc.up.railway.app/collect',
+    apiUrl: inferredApi,
     shopId: window.Shopify?.shop || 'unknown-shop',
     debug: true
   };
