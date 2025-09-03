@@ -128,6 +128,12 @@ app.get('/auth', (req, res) => {
   const redirectUri = `${process.env.APP_URL || ''}/auth/callback`;
   const scopes = (process.env.SHOPIFY_SCOPES || '').trim();
   const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${encodeURIComponent(apiKey)}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}&grant_options[]=per-user`;
+
+  // Debug modu: ?debug=1 ile auth URL'ünü ve scope'ları JSON olarak göster
+  if (req.query.debug === '1') {
+    return res.json({ shop, scopes, redirectUri, authUrl });
+  }
+
   res.redirect(authUrl);
 });
 
