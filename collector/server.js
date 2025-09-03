@@ -32,6 +32,17 @@ app.set('trust proxy', true);
 // Basit CORS
 app.use(cors());
 
+// CSP: statik dosyalardan ÖNCE uygulansın (admin iframe + dashboard.html)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/admin') || req.path.startsWith('/auth') || req.path === '/dashboard.html') {
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self' https:; frame-ancestors https://admin.shopify.com https://*.myshopify.com; script-src 'self' https: 'unsafe-inline'; style-src 'self' https: 'unsafe-inline'"
+    );
+  }
+  next();
+});
+
 // sendBeacon -> content-type: text/plain gelebilir; önce onu yakalayalım
 app.use((req, res, next) => {
   const ct = req.headers['content-type'] || '';
