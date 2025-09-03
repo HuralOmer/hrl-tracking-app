@@ -186,4 +186,17 @@ router.get('/top-products', async (req, res) => {
   }
 });
 
+// Mevcut mağazaları listele (analytics için seçim kolaylığı)
+router.get('/shops', async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `select distinct shop_id from events order by shop_id`
+    );
+    res.json(rows.map(r => r.shop_id));
+  } catch (e) {
+    console.error('shops error', e);
+    res.status(500).json({error:'server_error'});
+  }
+});
+
 module.exports = router;

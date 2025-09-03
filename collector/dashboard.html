@@ -19,7 +19,7 @@
 
   <div style="margin: 8px 0;">
     <label>Shop ID:</label>
-    <input id="shop" value="dev-shop.myshopify.com" />
+    <select id="shop"></select>
     <label>From:</label>
     <input id="from" type="date" />
     <label>To:</label>
@@ -49,10 +49,17 @@ function iso(d){ return d.toISOString().slice(0,10); }
   document.getElementById('to').value = iso(to);
 })();
 // shopId ve tarihleri kalıcı yap
-(function presetShop(){
+(async function presetShop(){
   try {
+    const sel = document.getElementById('shop');
+    const shops = await fetch(api + '/shops').then(r=>r.json()).catch(()=>[]);
+    sel.innerHTML = '';
+    (shops.length ? shops : ['dev-shop.myshopify.com','hural-software.myshopify.com']).forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = s; sel.appendChild(opt);
+    });
     const savedShop = localStorage.getItem('hrl.shop');
-    if (savedShop) document.getElementById('shop').value = savedShop;
+    if (savedShop) sel.value = savedShop;
     const sFrom = localStorage.getItem('hrl.from');
     const sTo = localStorage.getItem('hrl.to');
     if (sFrom) document.getElementById('from').value = sFrom;
