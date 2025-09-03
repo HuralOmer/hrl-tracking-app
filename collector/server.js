@@ -100,7 +100,7 @@ app.get('/admin', (req, res) => {
     <h1 style="margin:0">Hrl Store Tracker — Admin</h1>
     <div class="hint" id="app">Loading...</div>
   </header>
-  <iframe class="frame" src="/dashboard.html" title="Dashboard"></iframe>
+  <iframe class="frame" id="dash" src="/dashboard.html" title="Dashboard"></iframe>
   <script>
     (function(){
       var apiKey = ${JSON.stringify(apiKey)};
@@ -116,6 +116,29 @@ app.get('/admin', (req, res) => {
       if (AppBridge) {
         window.appBridge = AppBridge({ apiKey: apiKey, host: host, forceRedirect: true });
       }
+      // host -> shop domain çözümlemesi (base64 decode + "admin.shopify.com/store/<shop>/apps")
+      try {
+        if (host) {
+          var decoded = atob(host);
+          var m = decoded.match(/store\/([^/?#]+)/);
+          var shopPart = m && m[1];
+          if (shopPart) {
+            var shopDomain = shopPart + '.myshopify.com';
+            // iframe yüklenince shop alanını otomatik doldur
+            var f = document.getElementById('dash');
+            f.addEventListener('load', function(){
+              try {
+                var w = f.contentWindow;
+                var input = w.document && w.document.getElementById('shop');
+                if (input) {
+                  input.value = shopDomain;
+                  try { w.localStorage.setItem('hrl.shop', shopDomain); } catch(e){}
+                }
+              } catch(e){}
+            });
+          }
+        }
+      } catch(e) {}
       document.getElementById('app').innerHTML = 'Embedded dashboard yüklendi.';
     })();
   </script>

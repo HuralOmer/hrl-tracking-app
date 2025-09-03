@@ -48,11 +48,23 @@ function iso(d){ return d.toISOString().slice(0,10); }
   document.getElementById('from').value = iso(from);
   document.getElementById('to').value = iso(to);
 })();
+// shopId ve tarihleri kalıcı yap
+(function presetShop(){
+  try {
+    const savedShop = localStorage.getItem('hrl.shop');
+    if (savedShop) document.getElementById('shop').value = savedShop;
+    const sFrom = localStorage.getItem('hrl.from');
+    const sTo = localStorage.getItem('hrl.to');
+    if (sFrom) document.getElementById('from').value = sFrom;
+    if (sTo) document.getElementById('to').value = sTo;
+  } catch (e) {}
+})();
 async function load(){
   const shop = document.getElementById('shop').value.trim();
   const from = document.getElementById('from').value;
   const to = document.getElementById('to').value;
   const qs = `?shopId=${encodeURIComponent(shop)}&from=${from}&to=${to}`;
+  try { localStorage.setItem('hrl.shop', shop); localStorage.setItem('hrl.from', from); localStorage.setItem('hrl.to', to);} catch(e){}
 
   const s = await fetch(api + '/summary' + qs).then(r=>r.json());
   document.getElementById('views').innerText = s.views ?? 0;
