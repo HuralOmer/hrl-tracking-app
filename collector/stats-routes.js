@@ -186,6 +186,26 @@ router.get('/top-products', async (req, res) => {
   }
 });
 
+// Canlı aktif kullanıcı sayısı (son 30 sn içinde ping atan benzersiz session)
+router.get('/active', async (req, res) => {
+  try {
+    const shopId = req.query.shopId;
+    if (!shopId) return res.status(400).json({ error: 'shopId required' });
+
+    const { rows } = await pool.query(
+      `select count(distinct payload->>'session_id')::int as active_users
+       from events
+       where shop_id=$1
+         and event_name in ('visit_start','visit_heartbeat')
+         and ts > now() - interval '30 seconds'`,
+      [shopId]
+    );
+    return res.json({ active_users: rows[0]?.active_users ?? 0 });
+  } catch (e) {
+    console.error('active error', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
 // Mevcut mağazaları listele (analytics için seçim kolaylığı)
 router.get('/shops', async (_req, res) => {
   try {

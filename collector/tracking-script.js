@@ -20,6 +20,22 @@
 
   // Event counter for debugging
   let eventCounter = 0;
+  // Session management
+  const SESSION_KEY = 'hrl.session.id';
+  const LAST_PING_KEY = 'hrl.session.lastPing';
+  function getSessionId(){
+    try {
+      let id = localStorage.getItem(SESSION_KEY);
+      if (!id) {
+        id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        localStorage.setItem(SESSION_KEY, id);
+      }
+      return id;
+    } catch { return 'anon'; }
+  }
+  function markPing(){
+    try { localStorage.setItem(LAST_PING_KEY, String(Date.now())); } catch{}
+  }
 
   // Utility functions
   function log(...args) {
@@ -59,6 +75,7 @@
         referrer: document.referrer,
         userAgent: navigator.userAgent,
         timestamp: Date.now(),
+        session_id: getSessionId(),
         eventCounter: eventCounter,
         ...data.extra
       }
@@ -80,14 +97,23 @@
 
   // Page view tracking
   function trackPageView() {
-    sendEvent('page_view_start');
+    // session başlat (tek sefer)
+    const last = Number(localStorage.getItem(LAST_PING_KEY) || '0');
+    const now = Date.now();
+    const isNewSession = !last || (now - last) > 30*60*1000; // 30 dk
+    if (isNewSession) {
+      sendEvent('visit_start');
+    }
+    // heartbeat
+    markPing();
+    setInterval(() => { markPing(); sendEvent('visit_heartbeat'); }, 15*1000);
     
     // Page view end tracking (sayfa kapanırken) — sendBeacon tercih et
     window.addEventListener('beforeunload', () => {
       const dwellTime = Date.now() - pageStartTime;
       const payload = {
         shopId: CONFIG.shopId,
-        event: 'page_view_end',
+        event: 'visit_end',
         productHandle: getProductHandle(),
         buttonId: null,
         extra: {
@@ -95,6 +121,7 @@
           referrer: document.referrer,
           userAgent: navigator.userAgent,
           timestamp: Date.now(),
+          session_id: getSessionId(),
           dwell_ms: dwellTime
         }
       };

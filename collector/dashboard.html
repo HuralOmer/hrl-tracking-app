@@ -28,6 +28,7 @@
   </div>
 
   <div class="cards">
+    <div class="card"><div>Active Users</div><h2 id="active">-</h2></div>
     <div class="card"><div>Views</div><h2 id="views">-</h2></div>
     <div class="card"><div>Avg Dwell (ms)</div><h2 id="dwell">-</h2></div>
     <div class="card"><div>Clicks</div><h2 id="clicks">-</h2></div>
@@ -98,6 +99,16 @@ document.getElementById('load').onclick = load;
 load().finally(()=>{
   try { window.parent && window.parent.postMessage({ type: 'hrl:loaded' }, '*'); } catch(e){}
 });
+
+// Active users: 5 sn'de bir yenile
+setInterval(async () => {
+  try {
+    const shop = (document.getElementById('shop').value || '').trim();
+    if (!shop) return;
+    const a = await fetch(`${api}/active?shopId=${encodeURIComponent(shop)}`).then(r=>r.json());
+    document.getElementById('active').innerText = a.active_users ?? 0;
+  } catch (e) {}
+}, 5000);
 </script>
 </body>
 </html>
