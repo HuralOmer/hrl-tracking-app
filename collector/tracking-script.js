@@ -148,7 +148,15 @@
   }
 
   // Initialize tracking
+  let isInitialized = false;
+  
   function init() {
+    if (isInitialized) {
+      log('HRL Tracking already initialized, skipping...');
+      return;
+    }
+    
+    isInitialized = true;
     log('HRL Tracking initialized for shop:', CONFIG.shopId);
     
     const pageStartTime = Date.now();
