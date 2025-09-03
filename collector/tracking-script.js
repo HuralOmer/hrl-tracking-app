@@ -90,7 +90,15 @@
   }
 
   // Button click tracking
+  let clickListenerAdded = false;
+  
   function trackButtonClicks() {
+    if (clickListenerAdded) {
+      log('Click listener already added, skipping...');
+      return;
+    }
+    
+    clickListenerAdded = true;
     document.addEventListener('click', (event) => {
       const target = event.target;
       
@@ -115,7 +123,16 @@
   }
 
   // Cart tracking
+  let cartListenerAdded = false;
+  
   function trackCartEvents() {
+    if (cartListenerAdded) {
+      log('Cart listener already added, skipping...');
+      return;
+    }
+    
+    cartListenerAdded = true;
+    
     // Cart add events
     document.addEventListener('click', (event) => {
       if (event.target.matches('.add-to-cart, [data-testid*="add-to-cart"], [class*="add-to-cart"]')) {
