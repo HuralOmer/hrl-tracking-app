@@ -129,8 +129,8 @@ app.get('/auth', (req, res) => {
   const scopes = (process.env.SHOPIFY_SCOPES || '').trim();
   const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${encodeURIComponent(apiKey)}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}&grant_options[]=per-user`;
 
-  // Debug modu: ?debug=1 ile auth URL'ünü ve scope'ları JSON olarak göster
-  if (req.query.debug === '1') {
+  // Debug modu: yalnıza AUTH_DEBUG=1 iken ve ?debug=1 verildiğinde JSON göster
+  if (process.env.AUTH_DEBUG === '1' && req.query.debug === '1') {
     return res.json({ shop, scopes, redirectUri, authUrl });
   }
 
