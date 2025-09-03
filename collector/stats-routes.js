@@ -197,7 +197,7 @@ router.get('/active', async (req, res) => {
        from events
        where shop_id=$1
          and event_name in ('visit_start','visit_heartbeat')
-         and ts > now() - interval '5 seconds'`,
+         and ts > now() - interval '12 seconds'`,
       [shopId]
     );
     return res.json({ active_users: rows[0]?.active_users ?? 0 });

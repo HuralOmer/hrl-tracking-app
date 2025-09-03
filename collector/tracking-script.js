@@ -107,6 +107,11 @@
     // heartbeat
     markPing();
     setInterval(() => { markPing(); sendEvent('visit_heartbeat'); }, 5*1000);
+    // görünür olduğunda ve odağa geldiğinde ekstra ping gönder
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') { markPing(); sendEvent('visit_heartbeat'); }
+    });
+    window.addEventListener('focus', () => { markPing(); sendEvent('visit_heartbeat'); });
     
     // Page view end tracking (sayfa kapanırken) — sendBeacon tercih et
     window.addEventListener('beforeunload', () => {
