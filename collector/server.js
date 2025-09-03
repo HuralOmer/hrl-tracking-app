@@ -271,6 +271,25 @@ app.get('/auth/callback', async (req, res) => {
       console.warn('Webhook register failed:', e && e.message);
     }
 
+    // ScriptTag: tracking-script.js otomatik yüklensin
+    try {
+      await fetch(`https://${shop}/admin/api/2024-07/script_tags.json`, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          script_tag: {
+            event: 'onload',
+            src: `${process.env.APP_URL}/tracking-script.js`
+          }
+        })
+      });
+    } catch (e) {
+      console.warn('ScriptTag register failed:', e && e.message);
+    }
+
     return res.redirect(`/admin?host=${encodeURIComponent(host || '')}`);
   } catch (err) {
     console.error('OAuth callback error:', err);
