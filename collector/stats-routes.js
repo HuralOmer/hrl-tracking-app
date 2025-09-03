@@ -28,6 +28,31 @@ function parseRange(q) {
 
 router.get('/ping', (_req, res) => res.json({ ok: true }));
 
+// Debug endpoint - database'deki event'leri göster
+router.get('/debug', async (req, res) => {
+  try {
+    const shopId = req.query.shopId;
+    if (!shopId) return res.status(400).json({ error: 'shopId required' });
+
+    const { rows } = await pool.query(
+      `
+      select event_name, count(*) as count, 
+             array_agg(ts order by ts desc) as timestamps
+      from events 
+      where shop_id = $1 
+      group by event_name 
+      order by event_name
+      `,
+      [shopId]
+    );
+
+    res.json({ shopId, events: rows });
+  } catch (e) {
+    console.error('debug error', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // Özet metrikler
 router.get('/summary', async (req, res) => {
   try {
