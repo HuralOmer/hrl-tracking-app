@@ -139,8 +139,8 @@ app.get('/admin', (req, res) => {
           var h = host.replace(/-/g,'+').replace(/_/g,'/');
           while (h.length % 4) h += '=';
           var decoded = atob(h);
-          var m = decoded.match(/store\/([^/?#]+)/);
-          var shopPart = m && m[1];
+          var m = decoded.indexOf('store/');
+          var shopPart = m !== -1 ? decoded.substring(m + 6) : null;
           if (shopPart) {
             var shopDomain = shopPart + '.myshopify.com';
             // iframe yüklenince shop alanını otomatik doldur
