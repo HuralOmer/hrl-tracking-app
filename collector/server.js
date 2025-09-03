@@ -62,6 +62,75 @@ if (process.env.LOG_REQUESTS === '1') {
 // test-send.html ve statikleri servis et (collector klasörü)
 app.use(express.static(path.join(__dirname)));
 
+// Embedded admin için temel CSP (Shopify admin iframe'i)
+app.use((req, res, next) => {
+  if (req.path.startsWith('/admin') || req.path.startsWith('/auth')) {
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self' https:; frame-ancestors https://admin.shopify.com https://*.myshopify.com; script-src 'self' https: 'unsafe-inline'; style-src 'self' https: 'unsafe-inline'"
+    );
+  }
+  next();
+});
+
+// Basit embedded admin shell (App Bridge başlatır)
+app.get('/admin', (req, res) => {
+  const apiKey = process.env.SHOPIFY_API_KEY || '';
+  const { host } = req.query;
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hrl Store Tracker — Admin</title>
+  <script src="https://unpkg.com/@shopify/app-bridge@3"></script>
+  <style>body{font-family:system-ui,Arial;padding:24px}</style>
+</head>
+<body>
+  <h1>Hrl Store Tracker — Admin</h1>
+  <div id="app">Loading...</div>
+  <script>
+    (function(){
+      var apiKey = ${JSON.stringify(apiKey)};
+      var host = new URLSearchParams(window.location.search).get('host') || ${JSON.stringify(host || '')};
+      if (!apiKey) {
+        document.getElementById('app').innerText = 'Missing SHOPIFY_API_KEY on server.';
+        return;
+      }
+      if (!host) {
+        console.warn('Missing host param');
+      }
+      var AppBridge = window['app-bridge'] && window['app-bridge'].default;
+      if (AppBridge) {
+        window.appBridge = AppBridge({ apiKey: apiKey, host: host, forceRedirect: true });
+      }
+      document.getElementById('app').innerHTML = '<p>Embedded dashboard yakında burada. Geçici olarak <a href="/dashboard.html" target="_blank">harici dashboard</a>.</p>';
+    })();
+  </script>
+</body>
+</html>`;
+  res.type('html').send(html);
+});
+
+// OAuth başlangıç (iskelet)
+app.get('/auth', (req, res) => {
+  const shop = req.query.shop;
+  if (!shop) return res.status(400).send('missing shop');
+  const apiKey = process.env.SHOPIFY_API_KEY;
+  const redirectUri = `${process.env.APP_URL || ''}/auth/callback`;
+  const scopes = (process.env.SHOPIFY_SCOPES || '').trim();
+  const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${encodeURIComponent(apiKey)}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(redirectUri)}&grant_options[]=per-user`;
+  res.redirect(authUrl);
+});
+
+// OAuth callback (yalın doğrulama alanı için iskelet)
+app.get('/auth/callback', (req, res) => {
+  // Not: Üretimde HMAC doğrulaması ve access token değişimi yapılmalı
+  // Şimdilik sadece admin shell'e yönlendiriyoruz
+  const { host } = req.query;
+  return res.redirect(`/admin?host=${encodeURIComponent(host || '')}`);
+});
+
 // Stats API routes
 app.use('/stats', statsRoutes);
 
