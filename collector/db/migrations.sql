@@ -32,6 +32,13 @@ create table if not exists product_cache (
   primary key (shop_id, handle)
 );
 
+-- canlı presence tablosu (stabil aktif kullanıcı sayımı)
+create table if not exists presence (
+  shop_id text not null,
+  session_id text not null,
+  last_seen timestamptz not null,
+  primary key (shop_id, session_id)
+);
 -- shopify mağaza access tokenları
 create table if not exists shop_tokens (
   shop_domain text primary key,
