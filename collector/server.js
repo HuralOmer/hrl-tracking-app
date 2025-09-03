@@ -189,6 +189,26 @@ app.get('/auth/callback', async (req, res) => {
       );
     }
 
+    // Uninstall webhook kaydı (idempotent)
+    try {
+      await fetch(`https://${shop}/admin/api/2024-07/webhooks.json`, {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          webhook: {
+            topic: 'app/uninstalled',
+            address: `${process.env.APP_URL}/webhooks/app_uninstalled`,
+            format: 'json'
+          }
+        })
+      });
+    } catch (e) {
+      console.warn('Webhook register failed:', e && e.message);
+    }
+
     return res.redirect(`/admin?host=${encodeURIComponent(host || '')}`);
   } catch (err) {
     console.error('OAuth callback error:', err);
@@ -202,6 +222,44 @@ app.use('/stats', statsRoutes);
 // Sağlık uçları
 app.get(['/', '/health', '/healthz', '/ready'], (_req, res) => {
   res.json({ ok: true, message: 'collector alive', time: new Date().toISOString() });
+});
+
+// Webhook alıcısı: app/uninstalled
+app.post('/webhooks/app_uninstalled', express.raw({ type: 'application/json' }), (req, res) => {
+  try {
+    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+    const topic = req.get('X-Shopify-Topic');
+    const shop = req.get('X-Shopify-Shop-Domain');
+    const body = req.body; // Buffer
+
+    if (topic !== 'app/uninstalled') {
+      return res.status(400).send('invalid topic');
+    }
+
+    const digest = crypto
+      .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
+      .update(body)
+      .digest('base64');
+    if (digest !== hmacHeader) {
+      return res.status(401).send('invalid hmac');
+    }
+
+    // Token kaydını temizle
+    (async () => {
+      try {
+        if (pool && shop) {
+          await pool.query('delete from shop_tokens where shop_domain=$1', [shop]);
+        }
+      } catch (e) {
+        console.warn('webhook cleanup error:', e && e.message);
+      }
+    })();
+
+    res.status(200).send('ok');
+  } catch (err) {
+    console.error('webhook error:', err);
+    res.status(500).send('error');
+  }
 });
 
 // --- DB havuzu (opsiyonel) ---
