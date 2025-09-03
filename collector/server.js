@@ -94,6 +94,10 @@ app.use((req, res, next) => {
 app.get('/admin', (req, res) => {
   const apiKey = process.env.SHOPIFY_API_KEY || '';
   const { host } = req.query;
+  // Shopify dışında (host yoksa) doğrudan dashboard'a yönlendir
+  if (!host) {
+    return res.redirect('/dashboard.html');
+  }
   const html = `<!doctype html>
 <html>
 <head>
