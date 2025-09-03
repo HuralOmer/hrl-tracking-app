@@ -53,6 +53,28 @@ router.get('/debug', async (req, res) => {
   }
 });
 
+// Cleanup endpoint - eski product_view event'lerini sil
+router.post('/cleanup', async (req, res) => {
+  try {
+    const shopId = req.body.shopId;
+    if (!shopId) return res.status(400).json({ error: 'shopId required' });
+
+    const result = await pool.query(
+      `DELETE FROM events WHERE shop_id = $1 AND event_name = 'product_view'`,
+      [shopId]
+    );
+
+    res.json({ 
+      message: 'Product view events cleaned up',
+      deletedCount: result.rowCount,
+      shopId 
+    });
+  } catch (e) {
+    console.error('cleanup error', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // Özet metrikler
 router.get('/summary', async (req, res) => {
   try {
