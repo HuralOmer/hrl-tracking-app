@@ -4,28 +4,28 @@
 (function() {
   'use strict';
   
-  // Configuration
-  const currentSrc = (function(){
-    try { return document.currentScript && document.currentScript.src; } catch(e) { return ''; }
+  // Configuration (CDN/asset üzerinden yüklense bile doğru APP_URL'e git)
+  const scriptEl = (function(){
+    try { return document.currentScript || null; } catch(e) { return null; }
   })();
-  const inferredApi = (function(){
-    try { return currentSrc ? new URL(currentSrc).origin + '/collect' : 'https://hrl-tracking-app-production-9cbc.up.railway.app/collect'; }
-    catch { return 'https://hrl-tracking-app-production-9cbc.up.railway.app/collect'; }
+  const DEFAULT_APP = 'https://hrl-tracking-app-production-9cbc.up.railway.app';
+  const apiFromAttr = (function(){ try { return scriptEl && scriptEl.getAttribute('data-api'); } catch(_) { return null; }})();
+  const wsFromAttr  = (function(){ try { return scriptEl && scriptEl.getAttribute('data-ws'); } catch(_) { return null; }})();
+  const apiUrl = apiFromAttr || (DEFAULT_APP + '/collect');
+  const wsUrl = (function(){
+    if (wsFromAttr) return wsFromAttr;
+    try {
+      const base = new URL(DEFAULT_APP);
+      base.pathname = '/'; base.search = ''; base.hash = '';
+      base.protocol = (base.protocol === 'https:') ? 'wss:' : 'ws:';
+      return base.origin;
+    } catch(_) { return (window.location && window.location.origin) || DEFAULT_APP; }
   })();
   const CONFIG = {
-    apiUrl: inferredApi,
+    apiUrl: apiUrl,
     shopId: window.Shopify?.shop || 'unknown-shop',
     debug: true,
-    wsUrl: (function(){
-      try {
-        const u = new URL(CONFIG?.apiUrl || inferredApi);
-        u.pathname = '/';
-        u.search = '';
-        u.hash = '';
-        u.protocol = (u.protocol === 'https:') ? 'wss:' : 'ws:';
-        return u.origin; // socket.io client auto path
-      } catch(_) { return window.location.origin; }
-    })()
+    wsUrl: wsUrl
   };
 
   // Event counter for debugging
