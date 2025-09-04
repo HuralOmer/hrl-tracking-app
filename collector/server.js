@@ -39,12 +39,14 @@ if (Redis && (process.env.REDIS_URL || process.env.REDIS_HOST)) {
     redis = null;
   }
 }
-if (UpstashRedis && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+if (UpstashRedis && (
+  (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) ||
+  (process.env.REDIS_URL && process.env.REDIS_TOKEN)
+)) {
   try {
-    upstash = new UpstashRedis({
-      url: process.env.UPSTASH_REDIS_REST_URL,
-      token: process.env.UPSTASH_REDIS_REST_TOKEN
-    });
+    const restUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL;
+    const restToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.REDIS_TOKEN;
+    upstash = new UpstashRedis({ url: restUrl, token: restToken });
   } catch (e) {
     console.warn('Upstash init failed:', e && e.message);
     upstash = null;
@@ -549,6 +551,18 @@ app.post(COLLECT_PATHS, async (req, res) => {
       // active_sessions: boolean + last_seen ile upsert
       const sid = (record.extra && record.extra.session_id) || null;
       if (sid && (record.event === 'visit_start' || record.event === 'visit_heartbeat')) {
+        // Presence: ZADD (Upstash/Redis)
+        try {
+          const member = String(sid);
+          const score = Date.now();
+          if (upstash) { await upstash.zadd(presenceKey(record.shopId), { score, member }); }
+          else if (redis) { await redis.zadd(presenceKey(record.shopId), score, member); }
+          else {
+            const mem = presenceMemory.get(presenceKey(record.shopId)) || new Map();
+            mem.set(member, score);
+            presenceMemory.set(presenceKey(record.shopId), mem);
+          }
+        } catch(_e){}
         await pool.query(
           `insert into active_sessions (shop_id, session_id, active, last_seen)
            values ($1,$2,true,now())
@@ -558,6 +572,17 @@ app.post(COLLECT_PATHS, async (req, res) => {
         );
       }
       if (sid && record.event === 'visit_end') {
+        // Presence: ZREM
+        try {
+          const member = String(sid);
+          if (upstash) { await upstash.zrem(presenceKey(record.shopId), member); }
+          else if (redis) { await redis.zrem(presenceKey(record.shopId), member); }
+          else {
+            const mem = presenceMemory.get(presenceKey(record.shopId)) || new Map();
+            mem.delete(member);
+            presenceMemory.set(presenceKey(record.shopId), mem);
+          }
+        } catch(_e){}
         await pool.query(
           `insert into active_sessions (shop_id, session_id, active, last_seen)
            values ($1,$2,false,now())

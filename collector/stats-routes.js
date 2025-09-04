@@ -2,6 +2,33 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('./db');
+let UpstashRedis = null;
+try { UpstashRedis = require('@upstash/redis').Redis; } catch (_e) { /* optional */ }
+let Redis = null;
+try { Redis = require('ioredis'); } catch (_e) { /* optional */ }
+
+let upstash = null;
+let redis = null;
+if (UpstashRedis && ((process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) || (process.env.REDIS_URL && process.env.REDIS_TOKEN))) {
+  try {
+    upstash = new UpstashRedis({
+      url: process.env.UPSTASH_REDIS_REST_URL || process.env.REDIS_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN || process.env.REDIS_TOKEN
+    });
+  } catch (_e) { upstash = null; }
+}
+if (Redis && (process.env.REDIS_URL || process.env.REDIS_HOST)) {
+  try {
+    redis = new Redis(process.env.REDIS_URL || {
+      host: process.env.REDIS_HOST || '127.0.0.1',
+      port: Number(process.env.REDIS_PORT || 6379),
+      password: process.env.REDIS_PASSWORD || undefined,
+      tls: process.env.REDIS_TLS === '1' ? {} : undefined
+    });
+  } catch (_e) { redis = null; }
+}
+
+function presenceKey(shopId){ return `presence:${shopId}`; }
 
 // from/to query param'larını güvenli biçimde aralığa çevirir.
 // HTML date input'ları günü 00:00 gönderdiği için "to" değerini
@@ -49,6 +76,36 @@ router.get('/debug', async (req, res) => {
     res.json({ shopId, events: rows });
   } catch (e) {
     console.error('debug error', e);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// Upstash/Redis tabanlı aktif kullanıcı sayımı (20 sn pencerede)
+router.get('/active-redis', async (req, res) => {
+  try {
+    const shopId = req.query.shopId;
+    if (!shopId) return res.status(400).json({ error: 'shopId required' });
+    const now = Date.now();
+    const cutoff = now - 20_000;
+    const key = presenceKey(shopId);
+    if (upstash) {
+      try {
+        await upstash.zremrangebyscore(key, 0, cutoff);
+        const cnt = await upstash.zcount(key, cutoff, '+inf');
+        const n = typeof cnt === 'number' ? cnt : (cnt?.result ?? 0);
+        return res.json({ active_users: n, source: 'upstash' });
+      } catch(_e) {}
+    }
+    if (redis) {
+      try {
+        await redis.zremrangebyscore(key, 0, cutoff);
+        const cnt = await redis.zcount(key, cutoff, '+inf');
+        return res.json({ active_users: Number(cnt||0), source: 'redis' });
+      } catch(_e) {}
+    }
+    return res.json({ active_users: 0, source: 'memory' });
+  } catch (e) {
+    console.error('active-redis error', e);
     res.status(500).json({ error: 'server_error' });
   }
 });
