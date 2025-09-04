@@ -2,21 +2,69 @@
 require('dotenv').config();
 
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const path = require('path');
 const { Pool } = require('pg');
 const statsRoutes = require('./stats-routes');
 const crypto = require('crypto');
+const { Server: IOServer } = require('socket.io');
+let UpstashRedis = null;
+try { UpstashRedis = require('@upstash/redis').Redis; } catch (_e) { /* optional */ }
+let Redis = null;
+try { Redis = require('ioredis'); } catch (_e) { /* optional */ }
 
 const app = express();
+const server = http.createServer(app);
+const io = new IOServer(server, { cors: { origin: '*'} });
 
-// --- Basit in-memory dedup (kısa TTL) ---
+// --- Dedup: Redis tercih; yoksa in-memory ---
 const DEDUP_TTL_MS = 1500; // 1.5 saniye
+const DEDUP_TTL_SEC = Math.ceil(DEDUP_TTL_MS / 1000);
+let redis = null;
+let upstash = null;
+if (Redis && (process.env.REDIS_URL || process.env.REDIS_HOST)) {
+  try {
+    redis = new Redis(process.env.REDIS_URL || {
+      host: process.env.REDIS_HOST || '127.0.0.1',
+      port: Number(process.env.REDIS_PORT || 6379),
+      password: process.env.REDIS_PASSWORD || undefined,
+      tls: process.env.REDIS_TLS === '1' ? {} : undefined
+    });
+    redis.on('error', (e) => {
+      console.warn('Redis error:', e && e.message);
+    });
+  } catch (e) {
+    console.warn('Redis init failed, fallback to memory:', e && e.message);
+    redis = null;
+  }
+}
+if (UpstashRedis && process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+  try {
+    upstash = new UpstashRedis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN
+    });
+  } catch (e) {
+    console.warn('Upstash init failed:', e && e.message);
+    upstash = null;
+  }
+}
+
 const dedupCache = new Map();
 function dedupKey({ shopId, event, productHandle, buttonId }, ip) {
   return [shopId, event, productHandle || '', buttonId || '', ip || ''].join('|');
 }
-function dedupCheckAndMark(key) {
+async function dedupCheckAndMark(key) {
+  // Redis varsa SET NX EX ile atomik kontrol
+  if (redis) {
+    try {
+      const ok = await redis.set(`dedup:${key}`, '1', 'EX', DEDUP_TTL_SEC, 'NX');
+      return ok === null ? true : false; // NX başarısızsa null döner => daha önce var => dedup
+    } catch (_e) {
+      // sessizce memory'e düş
+    }
+  }
   const now = Date.now();
   for (const [k, t] of dedupCache) {
     if (now - t > DEDUP_TTL_MS) dedupCache.delete(k);
@@ -25,6 +73,108 @@ function dedupCheckAndMark(key) {
   dedupCache.set(key, now);
   return Boolean(last) && (now - last < DEDUP_TTL_MS);
 }
+
+// --- Presence (aktif kullanıcılar) ---
+const PRESENCE_TTL_MS = 20_000; // aktif sayımı için 20 saniye penceresi
+function presenceKey(shopId){ return `presence:${shopId}`; }
+
+async function presenceTrimAndCount(shopId, now) {
+  const key = presenceKey(shopId);
+  const cutoff = now - PRESENCE_TTL_MS;
+  // Trim and count
+  try {
+    if (upstash) {
+      await upstash.zremrangebyscore(key, 0, cutoff);
+      const cnt = await upstash.zcount(key, cutoff, '+inf');
+      return typeof cnt === 'number' ? cnt : (cnt?.result ?? 0);
+    }
+    if (redis) {
+      await redis.zremrangebyscore(key, 0, cutoff);
+      const cnt = await redis.zcount(key, cutoff, '+inf');
+      return Number(cnt || 0);
+    }
+  } catch (_e) {}
+  // Memory fallback (kaba)
+  const mem = presenceMemory.get(key) || new Map();
+  for (const [m, t] of mem) { if (t < cutoff) mem.delete(m); }
+  presenceMemory.set(key, mem);
+  return mem.size;
+}
+
+async function presenceUpsert(shopId, member, score) {
+  const key = presenceKey(shopId);
+  try {
+    if (upstash) { await upstash.zadd(key, { score, member }); return; }
+    if (redis) { await redis.zadd(key, score, member); return; }
+  } catch (_e) {}
+  // memory fallback
+  const mem = presenceMemory.get(key) || new Map();
+  mem.set(member, score);
+  presenceMemory.set(key, mem);
+}
+
+async function presenceRemove(shopId, member) {
+  const key = presenceKey(shopId);
+  try {
+    if (upstash) { await upstash.zrem(key, member); return; }
+    if (redis) { await redis.zrem(key, member); return; }
+  } catch (_e) {}
+  const mem = presenceMemory.get(key) || new Map();
+  mem.delete(member);
+  presenceMemory.set(key, mem);
+}
+
+const presenceMemory = new Map(); // key -> Map(member -> ts)
+
+io.on('connection', (socket) => {
+  let shopId = null;
+  let sessionId = null;
+  let watchShop = null;
+
+  socket.on('hello', async (payload = {}) => {
+    try {
+      shopId = (payload.shopId || '').trim();
+      sessionId = (payload.sessionId || '').trim() || socket.id;
+      if (!shopId) return;
+      const member = `${sessionId}`;
+      const now = Date.now();
+      await presenceUpsert(shopId, member, now);
+      socket.join(`shop:${shopId}`);
+      const count = await presenceTrimAndCount(shopId, now);
+      io.to(`shop:${shopId}`).emit('active', { shopId, active: count });
+    } catch (_e) {}
+  });
+
+  // Dashboard izleme: sadece sayı dinlemek için
+  socket.on('watch', async (payload = {}) => {
+    try {
+      const s = (payload.shopId || '').trim();
+      if (!s) return;
+      if (watchShop) socket.leave(`shop:${watchShop}`);
+      watchShop = s;
+      socket.join(`shop:${s}`);
+      const count = await presenceTrimAndCount(s, Date.now());
+      socket.emit('active', { shopId: s, active: count });
+    } catch (_e) {}
+  });
+
+  socket.on('ping', async () => {
+    if (!shopId || !sessionId) return;
+    const now = Date.now();
+    await presenceUpsert(shopId, `${sessionId}`, now);
+    const count = await presenceTrimAndCount(shopId, now);
+    io.to(`shop:${shopId}`).emit('active', { shopId, active: count });
+  });
+
+  socket.on('disconnect', async () => {
+    if (!shopId || !sessionId) return;
+    try {
+      await presenceRemove(shopId, `${sessionId}`);
+      const count = await presenceTrimAndCount(shopId, Date.now());
+      io.to(`shop:${shopId}`).emit('active', { shopId, active: count });
+    } catch (_e) {}
+  });
+});
 
 // Proxy arkasında gerçek IP
 app.set('trust proxy', true);
@@ -372,7 +522,7 @@ app.post(COLLECT_PATHS, async (req, res) => {
   // Dedup koruması: aynı anahtardan kısa sürede tekrar gelirse atla
   try {
     const key = dedupKey({ shopId, event, productHandle, buttonId }, req.ip);
-    if (dedupCheckAndMark(key)) {
+    if (await dedupCheckAndMark(key)) {
       return res.json({ ok: true, dedup: true });
     }
   } catch (_e) {
@@ -439,6 +589,6 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Collector listening on http://localhost:${PORT}`);
 });

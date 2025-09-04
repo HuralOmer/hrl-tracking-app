@@ -40,6 +40,7 @@
   <h3>Top Products</h3>
   <table id="tp"><thead><tr><th>Product Handle</th><th>Views</th><th>Avg Dwell (ms)</th></tr></thead><tbody></tbody></table>
 
+<script src="/socket.io/socket.io.js"></script>
 <script>
 const api = '/stats';
 function iso(d){ return d.toISOString().slice(0,10); }
@@ -109,6 +110,30 @@ setInterval(async () => {
     document.getElementById('active').innerText = a.active_users ?? 0;
   } catch (e) {}
 }, 5000);
+
+// WS: aktif kullanıcıları canlı dinle
+(function(){
+  try {
+    const socket = window.io ? window.io() : null;
+    if (!socket) return;
+    function watch(){
+      const shop = (document.getElementById('shop').value || '').trim();
+      if (shop) socket.emit('watch', { shopId: shop });
+    }
+    socket.on('connect', watch);
+    socket.on('active', (msg) => {
+      try {
+        const current = (document.getElementById('shop').value || '').trim();
+        if (msg && msg.shopId === current) {
+          document.getElementById('active').innerText = msg.active ?? 0;
+        }
+      } catch(e){}
+    });
+    document.getElementById('shop').addEventListener('change', watch);
+    // İlk izleme
+    watch();
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>

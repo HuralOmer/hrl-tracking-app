@@ -15,7 +15,17 @@
   const CONFIG = {
     apiUrl: inferredApi,
     shopId: window.Shopify?.shop || 'unknown-shop',
-    debug: true
+    debug: true,
+    wsUrl: (function(){
+      try {
+        const u = new URL(CONFIG?.apiUrl || inferredApi);
+        u.pathname = '/';
+        u.search = '';
+        u.hash = '';
+        u.protocol = (u.protocol === 'https:') ? 'wss:' : 'ws:';
+        return u.origin; // socket.io client auto path
+      } catch(_) { return window.location.origin; }
+    })()
   };
 
   // Event counter for debugging
@@ -252,6 +262,68 @@
     trackProductView();
     
     log('All tracking events registered');
+
+    // --- WS presence: lider sekme + ping ---
+    (function setupWS(){
+      const KEY = 'hrl.leader.lock';
+      const LOCK_TTL = 8000; // ms
+      const PING_MS = 5000;
+
+      function now(){ return Date.now(); }
+      function isLeader(){
+        try {
+          const v = JSON.parse(localStorage.getItem(KEY) || 'null');
+          return v && v.owner === window.name && (now() - v.ts) < LOCK_TTL;
+        } catch { return false; }
+      }
+      function tryAcquire(){
+        try {
+          const v = JSON.parse(localStorage.getItem(KEY) || 'null');
+          if (!v || (now() - v.ts) >= LOCK_TTL) {
+            localStorage.setItem(KEY, JSON.stringify({ owner: window.name, ts: now() }));
+            return true;
+          }
+          return v.owner === window.name;
+        } catch { return false; }
+      }
+      function refresh(){
+        try { localStorage.setItem(KEY, JSON.stringify({ owner: window.name, ts: now() })); } catch {}
+      }
+
+      // window.name boş ise ata
+      if (!window.name) { try { window.name = 'hrl_' + Math.random().toString(36).slice(2); } catch{} }
+
+      let socket = null;
+      function ensureSocket(){
+        if (!window.io) return;
+        if (!socket) {
+          socket = window.io(CONFIG.wsUrl, { transports: ['websocket','polling'] });
+          socket.on('connect', () => {
+            socket.emit('hello', { shopId: CONFIG.shopId, sessionId: getSessionId() });
+          });
+        }
+      }
+
+      // socket.io client script yoksa yükle
+      (function injectIo(){
+        if (window.io) { ensureSocket(); return; }
+        const s = document.createElement('script');
+        s.src = '/socket.io/socket.io.js';
+        s.async = true;
+        s.onload = () => ensureSocket();
+        document.head.appendChild(s);
+      })();
+
+      setInterval(() => {
+        if (tryAcquire()) {
+          refresh();
+          ensureSocket();
+          if (window.io && socket && socket.connected) {
+            socket.emit('ping');
+          }
+        }
+      }, PING_MS);
+    })();
   }
 
   // DOM ready'de başlat
