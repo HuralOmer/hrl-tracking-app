@@ -396,20 +396,25 @@ app.post(COLLECT_PATHS, async (req, res) => {
         [record.shopId, record.event, record.productHandle, record.extra ? JSON.stringify(record.extra) : null]
       );
 
-      // presence: visit_start/heartbeat geldiğinde upsert last_seen
+      // active_sessions: boolean + last_seen ile upsert
       const sid = (record.extra && record.extra.session_id) || null;
       if (sid && (record.event === 'visit_start' || record.event === 'visit_heartbeat')) {
         await pool.query(
-          `insert into presence (shop_id, session_id, last_seen)
-           values ($1, $2, now())
+          `insert into active_sessions (shop_id, session_id, active, last_seen)
+           values ($1,$2,true,now())
            on conflict (shop_id, session_id)
-           do update set last_seen = excluded.last_seen`,
+           do update set active=true, last_seen=excluded.last_seen`,
           [record.shopId, sid]
         );
       }
-      // visit_end geldiğinde presence'tan sil (best-effort)
       if (sid && record.event === 'visit_end') {
-        await pool.query('delete from presence where shop_id=$1 and session_id=$2', [record.shopId, sid]).catch(()=>{});
+        await pool.query(
+          `insert into active_sessions (shop_id, session_id, active, last_seen)
+           values ($1,$2,false,now())
+           on conflict (shop_id, session_id)
+           do update set active=false, last_seen=excluded.last_seen`,
+          [record.shopId, sid]
+        ).catch(()=>{});
       }
     } else {
       // DB yoksa en azından loglayalım

@@ -39,6 +39,15 @@ create table if not exists presence (
   last_seen timestamptz not null,
   primary key (shop_id, session_id)
 );
+
+-- aktif oturumlar (boolean + last_seen ile daha stabil sayaç)
+create table if not exists active_sessions (
+  shop_id text not null,
+  session_id text not null,
+  active boolean not null default true,
+  last_seen timestamptz not null,
+  primary key (shop_id, session_id)
+);
 -- shopify mağaza access tokenları
 create table if not exists shop_tokens (
   shop_domain text primary key,

@@ -194,8 +194,8 @@ router.get('/active', async (req, res) => {
 
     const { rows } = await pool.query(
       `select count(*)::int as active_users
-         from presence
-         where shop_id=$1 and last_seen > now() - interval '12 seconds'`,
+         from active_sessions
+         where shop_id=$1 and active=true and last_seen > now() - interval '12 seconds'`,
       [shopId]
     );
     return res.json({ active_users: rows[0]?.active_users || 0 });
