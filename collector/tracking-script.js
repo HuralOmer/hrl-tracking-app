@@ -148,9 +148,9 @@
     const last = Number(localStorage.getItem(LAST_PING_KEY) || '0');
     const now = Date.now();
     const isNewSession = !last || (now - last) > 30*60*1000; // 30 dk
-    if (isNewSession) {
-      sendEvent('visit_start');
-    }
+    if (isNewSession) { sendEvent('visit_start'); }
+    // Analitik özetler için page_view_start ekle
+    try { sendEvent('page_view_start'); } catch(_e){}
     // heartbeat
     markPing();
     setInterval(() => { markPing(); sendEvent('visit_heartbeat'); }, 5*1000);
@@ -163,7 +163,22 @@
     // Page view end tracking (sayfa kapanırken) — sendBeacon tercih et
     window.addEventListener('beforeunload', () => {
       const dwellTime = Date.now() - pageStartTime;
-      const payload = {
+      const pvPayload = {
+        shopId: CONFIG.shopId,
+        event: 'page_view_end',
+        productHandle: getProductHandle(),
+        buttonId: null,
+        extra: {
+          url: window.location.href,
+          referrer: document.referrer,
+          userAgent: navigator.userAgent,
+          timestamp: Date.now(),
+          session_id: getSessionId(),
+          dwell_ms: dwellTime,
+          is_anonymous: isAnonymous()
+        }
+      };
+      const visitEndPayload = {
         shopId: CONFIG.shopId,
         event: 'visit_end',
         productHandle: getProductHandle(),
@@ -174,21 +189,30 @@
           userAgent: navigator.userAgent,
           timestamp: Date.now(),
           session_id: getSessionId(),
-          dwell_ms: dwellTime
+          dwell_ms: dwellTime,
+          is_anonymous: isAnonymous()
         }
       };
 
       if (navigator.sendBeacon) {
         try {
-          const blob = new Blob([JSON.stringify(payload)], { type: 'text/plain' });
-          navigator.sendBeacon(CONFIG.apiUrl, blob);
+          const b1 = new Blob([JSON.stringify(pvPayload)], { type: 'text/plain' });
+          const b2 = new Blob([JSON.stringify(visitEndPayload)], { type: 'text/plain' });
+          navigator.sendBeacon(CONFIG.apiUrl, b1);
+          navigator.sendBeacon(CONFIG.apiUrl, b2);
         } catch (_e) {
           // Fallback fetch (sync olmamalı)
           fetch(CONFIG.apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             keepalive: true,
-            body: JSON.stringify(payload)
+            body: JSON.stringify(pvPayload)
+          }).catch(() => {});
+          fetch(CONFIG.apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            keepalive: true,
+            body: JSON.stringify(visitEndPayload)
           }).catch(() => {});
         }
       } else {
@@ -197,7 +221,13 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           keepalive: true,
-          body: JSON.stringify(payload)
+          body: JSON.stringify(pvPayload)
+        }).catch(() => {});
+        fetch(CONFIG.apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          keepalive: true,
+          body: JSON.stringify(visitEndPayload)
         }).catch(() => {});
       }
     });
@@ -226,8 +256,10 @@
       if (isImportantButton) {
         const buttonId = getButtonId(target);
         sendEvent('click', {
+          // buttonId üst seviyede server tarafından saklanmıyor; payload'a da yaz
           buttonId: buttonId,
           extra: {
+            button_id: buttonId,
             buttonText: target.textContent?.trim(),
             buttonClass: target.className
           }
