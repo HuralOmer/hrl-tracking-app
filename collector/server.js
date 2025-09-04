@@ -380,6 +380,32 @@ app.post('/admin/script-tags/install', async (req, res) => {
   }
 });
 
+// Convenience: allow GET as well for quick manual trigger
+app.get('/admin/script-tags/install', async (req, res) => {
+  try {
+    const shop = (req.query.shop || '').trim();
+    if (!shop) return res.status(400).json({ ok: false, error: 'shop required' });
+    if (!pool) return res.status(500).json({ ok: false, error: 'db_unavailable' });
+    const r = await pool.query('select access_token from shop_tokens where shop_domain=$1', [shop]);
+    const token = r.rows[0]?.access_token;
+    if (!token) return res.status(404).json({ ok: false, error: 'token_not_found' });
+    const src = `${process.env.APP_URL}/tracking-script.js`;
+    const resp = await fetch(`https://${shop}/admin/api/2024-07/script_tags.json`, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ script_tag: { event: 'onload', src } })
+    });
+    const data = await resp.json();
+    return res.json({ ok: true, data });
+  } catch (e) {
+    console.error('script-tags install (GET) error', e);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
 // OAuth başlangıç (iskelet)
 app.get('/auth', (req, res) => {
   const shop = req.query.shop;
