@@ -406,6 +406,45 @@ app.get('/admin/script-tags/install', async (req, res) => {
   }
 });
 
+// Temizlik: tüm ScriptTag'ları listeler, en yeni dışındakileri siler
+app.post('/admin/script-tags/cleanup', async (req, res) => {
+  try {
+    const shop = (req.query.shop || '').trim();
+    if (!shop) return res.status(400).json({ ok: false, error: 'shop required' });
+    if (!pool) return res.status(500).json({ ok: false, error: 'db_unavailable' });
+    const r = await pool.query('select access_token from shop_tokens where shop_domain=$1', [shop]);
+    const token = r.rows[0]?.access_token;
+    if (!token) return res.status(404).json({ ok: false, error: 'token_not_found' });
+
+    // listele
+    const listResp = await fetch(`https://${shop}/admin/api/2024-07/script_tags.json`, {
+      headers: { 'X-Shopify-Access-Token': token }
+    });
+    const listData = await listResp.json();
+    const tags = Array.isArray(listData?.script_tags) ? listData.script_tags : [];
+    if (tags.length <= 1) return res.json({ ok: true, deleted: 0, kept: tags[0]?.id || null });
+
+    // en yeni hariç hepsini sil
+    const sorted = tags.slice().sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
+    const keep = sorted[0];
+    let deleted = 0;
+    for (let i=1;i<sorted.length;i++) {
+      const id = sorted[i].id;
+      try {
+        await fetch(`https://${shop}/admin/api/2024-07/script_tags/${id}.json`, {
+          method: 'DELETE',
+          headers: { 'X-Shopify-Access-Token': token }
+        });
+        deleted++;
+      } catch(_) {}
+    }
+    return res.json({ ok: true, deleted, kept: keep?.id || null });
+  } catch (e) {
+    console.error('script-tags cleanup error', e);
+    res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
 // OAuth başlangıç (iskelet)
 app.get('/auth', (req, res) => {
   const shop = req.query.shop;
