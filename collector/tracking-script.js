@@ -30,19 +30,55 @@
 
   // Event counter for debugging
   let eventCounter = 0;
-  // Session management
+  // Session management + privacy
   const SESSION_KEY = 'hrl.session.id';
   const LAST_PING_KEY = 'hrl.session.lastPing';
+  const COOKIE_SID = 'hrl_sid';
+  const COOKIE_CONSENT = 'hrl_consent'; // mağaza tarafı bu çerezi 1 yapabilir
+
+  function readCookie(name){
+    try {
+      const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()\[\]\\\/\+^])/g, '\\$1') + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch { return null; }
+  }
+  function writeCookie(name, value, days){
+    try {
+      const d = new Date();
+      d.setTime(d.getTime() + (days*24*60*60*1000));
+      document.cookie = `${name}=${encodeURIComponent(value)}; path=/; expires=${d.toUTCString()}; SameSite=Lax`;
+    } catch {}
+  }
+  function hasConsent(){
+    try {
+      // 1) Shopify Privacy API varsa genişletilebilir; şimdilik basit cookie ile
+      const c = readCookie(COOKIE_CONSENT);
+      return c === '1' || c === 'true';
+    } catch { return false; }
+  }
+  function generateId(){
+    return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  }
   function getSessionId(){
     try {
-      let id = localStorage.getItem(SESSION_KEY);
-      if (!id) {
-        id = Math.random().toString(36).slice(2) + Date.now().toString(36);
-        localStorage.setItem(SESSION_KEY, id);
+      if (hasConsent()) {
+        // 1P cookie ile kalıcı ID
+        let sid = readCookie(COOKIE_SID) || localStorage.getItem(SESSION_KEY);
+        if (!sid) { sid = generateId(); }
+        writeCookie(COOKIE_SID, sid, 365);
+        try { localStorage.setItem(SESSION_KEY, sid); } catch{}
+        return sid;
       }
-      return id;
+      // İzin yoksa: anonim, yalnızca oturum (sessionStorage) 
+      const key = 'hrl.session.ephemeral';
+      try {
+        let sid = sessionStorage.getItem(key);
+        if (!sid) { sid = generateId(); sessionStorage.setItem(key, sid); }
+        return sid;
+      } catch { return generateId(); }
     } catch { return 'anon'; }
   }
+  function isAnonymous(){ return !hasConsent(); }
   function markPing(){
     try { localStorage.setItem(LAST_PING_KEY, String(Date.now())); } catch{}
   }
@@ -86,6 +122,7 @@
         userAgent: navigator.userAgent,
         timestamp: Date.now(),
         session_id: getSessionId(),
+        is_anonymous: isAnonymous(),
         eventCounter: eventCounter,
         ...data.extra
       }
