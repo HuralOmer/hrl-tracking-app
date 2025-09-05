@@ -110,7 +110,10 @@ async function load(){
 }
 document.getElementById('load').onclick = load;
 // Önce shop listesini hazırla, sonra yükle
-presetShop().then(load).finally(()=>{
+presetShop().then(async () => {
+  await load();
+  try { if (window.watchCurrentShop) window.watchCurrentShop(); } catch(e){}
+}).finally(()=>{
   try { window.parent && window.parent.postMessage({ type: 'hrl:loaded' }, '*'); } catch(e){}
 });
 
@@ -135,6 +138,8 @@ setInterval(async () => {
       const shop = (document.getElementById('shop').value || '').trim();
       if (shop) socket.emit('watch', { shopId: shop });
     }
+    // dışarıdan tetiklemek için global referans
+    try { window.watchCurrentShop = watch; } catch(e){}
     socket.on('connect', () => { __wsActive = true; watch(); });
     socket.on('disconnect', () => { __wsActive = false; });
     socket.on('active', (msg) => {
@@ -148,6 +153,8 @@ setInterval(async () => {
     document.getElementById('shop').addEventListener('change', watch);
     // İlk izleme
     watch();
+    // olası oda kaybına karşı periyodik re-watch
+    setInterval(watch, 10000);
   } catch (e) {}
 })();
 </script>
