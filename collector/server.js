@@ -93,7 +93,8 @@ async function dedupCheckAndMark(key) {
 }
 
 // --- Presence (aktif kullanıcılar) ---
-const PRESENCE_TTL_MS = 15_000; // aktif sayımı için 15 saniye penceresi
+const PRESENCE_TTL_MS = 30_000; // aktif sayımı için 30 saniye penceresi
+const DISCONNECT_GRACE_MS = 10_000; // kopuş sonrası ekstra görünürlük
 function presenceKey(shopId){ return `presence:${shopId}`; }
 
 async function presenceTrimAndCount(shopId, now) {
@@ -233,11 +234,43 @@ io.on('connection', (socket) => {
   socket.on('disconnect', async () => {
     if (!shopId || !sessionId) return;
     try {
-      await presenceRemove(shopId, `${sessionId}`);
+      // Hemen silme; kısa süre daha aktif say (grace)
+      const ts = Date.now() + DISCONNECT_GRACE_MS;
+      await presenceUpsert(shopId, `${sessionId}`, ts);
       const count = await presenceTrimAndCount(shopId, Date.now());
       scheduleActiveEmit(shopId, count);
     } catch (_e) {}
   });
+});
+
+// Presence debug: son görülenler
+app.get('/stats/presence-debug', async (req, res) => {
+  try {
+    const shopId = (req.query.shopId || '').trim();
+    if (!shopId) return res.status(400).json({ error: 'shopId required' });
+    const key = presenceKey(shopId);
+    const cutoff = Date.now() - PRESENCE_TTL_MS;
+    let entries = [];
+    try {
+      if (upstash) {
+        const arr = await upstash.zrange(key, cutoff, '+inf', { byScore: true, withScores: true });
+        // upstash returns array alternating member/score or object depending on version; normalize
+        if (Array.isArray(arr)) {
+          for (let i=0;i<arr.length;i+=2) entries.push({ member: arr[i], score: Number(arr[i+1]) });
+        } else if (arr && arr.length === 0) { entries = []; }
+      } else if (redis) {
+        const arr = await redis.zrangebyscore(key, cutoff, '+inf', 'WITHSCORES');
+        for (let i=0;i<arr.length;i+=2) entries.push({ member: arr[i], score: Number(arr[i+1]) });
+      } else {
+        const mem = presenceMemory.get(key) || new Map();
+        for (const [m, t] of mem) if (t >= cutoff) entries.push({ member: m, score: t });
+      }
+    } catch (_) {}
+    entries.sort((a,b)=>b.score-a.score);
+    return res.json({ shopId, ttl_ms: PRESENCE_TTL_MS, count: entries.length, entries });
+  } catch (e) {
+    return res.status(500).json({ error: 'server_error' });
+  }
 });
 
 // Proxy arkasında gerçek IP
