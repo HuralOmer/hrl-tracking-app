@@ -377,7 +377,9 @@
       (function injectIo(){
         if (window.io) { ensureSocket(); return; }
         const s = document.createElement('script');
-        s.src = '/socket.io/socket.io.js';
+        // Tam origin ile yükle (Shopify domaini yerine Collector origin)
+        const base = (function(){ try { return new URL(CONFIG.wsUrl).origin; } catch(_) { return ''; } })();
+        s.src = (base ? (base + '/socket.io/socket.io.js') : '/socket.io/socket.io.js');
         s.async = true;
         s.onload = () => ensureSocket();
         document.head.appendChild(s);
