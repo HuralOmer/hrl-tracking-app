@@ -23,20 +23,36 @@ const DEDUP_TTL_MS = 1500; // 1.5 saniye
 const DEDUP_TTL_SEC = Math.ceil(DEDUP_TTL_MS / 1000);
 let redis = null;
 let upstash = null;
-if (Redis && (process.env.REDIS_URL || process.env.REDIS_HOST)) {
-  try {
-    redis = new Redis(process.env.REDIS_URL || {
-      host: process.env.REDIS_HOST || '127.0.0.1',
-      port: Number(process.env.REDIS_PORT || 6379),
-      password: process.env.REDIS_PASSWORD || undefined,
-      tls: process.env.REDIS_TLS === '1' ? {} : undefined
-    });
-    redis.on('error', (e) => {
-      console.warn('Redis error:', e && e.message);
-    });
-  } catch (e) {
-    console.warn('Redis init failed, fallback to memory:', e && e.message);
-    redis = null;
+// ioredis'i yalnızca GEÇERLİ bir yapılandırma varsa aç
+if (Redis) {
+  const url = (process.env.REDIS_URL || '').trim();
+  const hasValidUrl = /^rediss?:\/\//i.test(url);
+  const hasHost = Boolean((process.env.REDIS_HOST || '').trim());
+  if (hasValidUrl || hasHost) {
+    try {
+      redis = new Redis(hasValidUrl ? url : {
+        host: process.env.REDIS_HOST,
+        port: Number(process.env.REDIS_PORT || 6379),
+        password: process.env.REDIS_PASSWORD || undefined,
+        tls: process.env.REDIS_TLS === '1' ? {} : undefined,
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        maxRetriesPerRequest: 0,
+        retryStrategy: () => null
+      });
+      redis.on('error', (e) => {
+        console.warn('Redis error:', e && e.message);
+      });
+      // Bağlantıyı dene; başarısızsa tamamen devre dışı bırak
+      redis.connect().catch((e) => {
+        console.warn('Redis connect failed, disabling:', e && e.message);
+        try { redis.disconnect(); } catch(_) {}
+        redis = null;
+      });
+    } catch (e) {
+      console.warn('Redis init failed, fallback to memory:', e && e.message);
+      redis = null;
+    }
   }
 }
 if (UpstashRedis && (

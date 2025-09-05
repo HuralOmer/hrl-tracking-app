@@ -51,7 +51,7 @@ function iso(d){ return d.toISOString().slice(0,10); }
   document.getElementById('to').value = iso(to);
 })();
 // shopId ve tarihleri kalıcı yap
-(async function presetShop(){
+async function presetShop(){
   try {
     const sel = document.getElementById('shop');
     const shops = await fetch(api + '/shops').then(r=>r.json()).catch(()=>[]);
@@ -62,42 +62,55 @@ function iso(d){ return d.toISOString().slice(0,10); }
     });
     const savedShop = localStorage.getItem('hrl.shop');
     if (savedShop) sel.value = savedShop;
+    // Eğer seçili yoksa ilkini seç
+    if (!sel.value && sel.options.length > 0) {
+      sel.value = sel.options[0].value;
+    }
     const sFrom = localStorage.getItem('hrl.from');
     const sTo = localStorage.getItem('hrl.to');
     if (sFrom) document.getElementById('from').value = sFrom;
     if (sTo) document.getElementById('to').value = sTo;
   } catch (e) {}
-})();
+}
 async function load(){
   const shop = document.getElementById('shop').value.trim();
   const from = document.getElementById('from').value;
   const to = document.getElementById('to').value;
+  if (!shop) {
+    console.warn('Select a shop first.');
+    document.getElementById('active').innerText = '-';
+    document.getElementById('views').innerText = '-';
+    document.getElementById('dwell').innerText = '-';
+    document.getElementById('clicks').innerText = '-';
+    return;
+  }
   const qs = `?shopId=${encodeURIComponent(shop)}&from=${from}&to=${to}`;
   try { localStorage.setItem('hrl.shop', shop); localStorage.setItem('hrl.from', from); localStorage.setItem('hrl.to', to);} catch(e){}
 
-  const s = await fetch(api + '/summary' + qs).then(r=>r.json());
+  const s = await fetch(api + '/summary' + qs).then(r=> r.ok ? r.json() : { views:0, avg_dwell_ms:0, clicks:0 }).catch(()=>({views:0,avg_dwell_ms:0,clicks:0}));
   document.getElementById('views').innerText = s.views ?? 0;
   document.getElementById('dwell').innerText = s.avg_dwell_ms ?? 0;
   document.getElementById('clicks').innerText = s.clicks ?? 0;
 
-  const buttons = await fetch(api + '/top-buttons' + qs).then(r=>r.json());
+  const buttons = await fetch(api + '/top-buttons' + qs).then(r=> r.ok ? r.json() : []).catch(()=>[]);
   const tb = document.querySelector('#tb tbody'); tb.innerHTML='';
-  buttons.forEach(b=>{
+  (Array.isArray(buttons) ? buttons : []).forEach(b=>{
     const tr=document.createElement('tr');
     tr.innerHTML = `<td>${b.button_id||'(unknown)'}</td><td>${b.clicks}</td>`;
     tb.appendChild(tr);
   });
 
-  const products = await fetch(api + '/top-products' + qs).then(r=>r.json());
+  const products = await fetch(api + '/top-products' + qs).then(r=> r.ok ? r.json() : []).catch(()=>[]);
   const tp = document.querySelector('#tp tbody'); tp.innerHTML='';
-  products.forEach(p=>{
+  (Array.isArray(products) ? products : []).forEach(p=>{
     const tr=document.createElement('tr');
     tr.innerHTML = `<td>${p.product_handle}</td><td>${p.views}</td><td>${p.avg_dwell_ms??0}</td>`;
     tp.appendChild(tr);
   });
 }
 document.getElementById('load').onclick = load;
-load().finally(()=>{
+// Önce shop listesini hazırla, sonra yükle
+presetShop().then(load).finally(()=>{
   try { window.parent && window.parent.postMessage({ type: 'hrl:loaded' }, '*'); } catch(e){}
 });
 
