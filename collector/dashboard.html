@@ -134,9 +134,16 @@ setInterval(async () => {
   try {
     const socket = window.io ? window.io() : null;
     if (!socket) return;
-    function watch(){
+    async function watch(){
       const shop = (document.getElementById('shop').value || '').trim();
-      if (shop) socket.emit('watch', { shopId: shop });
+      if (shop) {
+        socket.emit('watch', { shopId: shop });
+        // Anında geri bildirim için bir defalık REST fallback ile güncelle
+        try {
+          const a = await fetch(`${api}/active?shopId=${encodeURIComponent(shop)}`).then(r=>r.json());
+          document.getElementById('active').innerText = a.active_users ?? 0;
+        } catch(_e){}
+      }
     }
     // dışarıdan tetiklemek için global referans
     try { window.watchCurrentShop = watch; } catch(e){}
