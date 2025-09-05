@@ -61,7 +61,7 @@ if (Redis) {
             tls: process.env.REDIS_TLS === '1' ? {} : undefined
           });
           const sub = pub.duplicate();
-          await pub.connect(); await sub.connect();
+          // ioredis kendi otomatik bağlanır; açık await kullanmayalım
           io.adapter(createAdapter(pub, sub));
         } catch (e) {
           console.warn('socket.io redis adapter init failed:', e && e.message);

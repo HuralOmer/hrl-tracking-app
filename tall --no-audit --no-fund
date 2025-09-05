@@ -1,0 +1,5 @@
+[33m1f75bc8[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m feat(presence): TTL=30s + 10s disconnect grace; add /stats/presence-debug
+[33ma45e684[m feat: HTTP /hb heartbeat fallback; dashboard periodic REST resync; client fallback pings
+[33m0b788e0[m feat(presence): histerezis ve 1s coalesce; ping=3s, TTL=15s; dashboard EMA+throttle
+[33m986fc4c[m chore(dashboard): watch sonrası aktif sayıyı anında REST ile güncelle
+[33m03bb019[m fix(dashboard): shop değişiminde WS watch tetikle; periyodik re-watch
