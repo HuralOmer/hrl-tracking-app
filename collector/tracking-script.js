@@ -336,7 +336,7 @@
     (function setupWS(){
       const KEY = 'hrl.leader.lock';
       const LOCK_TTL = 8000; // ms
-      const PING_MS = 5000;
+      const PING_MS = 3000; // 3s ping
 
       function now(){ return Date.now(); }
       function isLeader(){
@@ -366,9 +366,16 @@
       function ensureSocket(){
         if (!window.io) return;
         if (!socket) {
-          socket = window.io(CONFIG.wsUrl, { transports: ['websocket','polling'] });
+          socket = window.io(CONFIG.wsUrl, {
+            transports: ['websocket','polling'],
+            reconnectionDelay: 500,
+            reconnectionDelayMax: 3000,
+            randomizationFactor: 0.5
+          });
           socket.on('connect', () => {
             socket.emit('hello', { shopId: CONFIG.shopId, sessionId: getSessionId() });
+            // bağlanır bağlanmaz ping
+            socket.emit('ping');
           });
         }
       }
@@ -394,6 +401,18 @@
           }
         }
       }, PING_MS);
+
+      // görünür/odak olduğunda anında ping
+      try {
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible' && socket && socket.connected) {
+            socket.emit('ping');
+          }
+        });
+        window.addEventListener('focus', () => {
+          if (socket && socket.connected) socket.emit('ping');
+        });
+      } catch(_){}
     })();
   }
 

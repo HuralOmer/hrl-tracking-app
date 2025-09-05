@@ -93,7 +93,7 @@ async function dedupCheckAndMark(key) {
 }
 
 // --- Presence (aktif kullanıcılar) ---
-const PRESENCE_TTL_MS = 20_000; // aktif sayımı için 20 saniye penceresi
+const PRESENCE_TTL_MS = 15_000; // aktif sayımı için 15 saniye penceresi
 function presenceKey(shopId){ return `presence:${shopId}`; }
 
 async function presenceTrimAndCount(shopId, now) {
@@ -144,6 +144,52 @@ async function presenceRemove(shopId, member) {
 
 const presenceMemory = new Map(); // key -> Map(member -> ts)
 
+// --- Active yayınını coalesce + histerezis ile sınırlama ---
+const emitStateByShop = new Map(); // shopId -> { lastCount, lastEmit, pending, timer, lastDecreaseProbe }
+const EMIT_MIN_INTERVAL_MS = 1000; // en fazla saniyede 1 yayın
+const DECREASE_DELAY_MS = 1500; // azalışları geciktir (histerezis)
+
+function scheduleActiveEmit(shopId, nextCount) {
+  const now = Date.now();
+  const state = emitStateByShop.get(shopId) || { lastCount: 0, lastEmit: 0, pending: null, timer: null, lastDecreaseProbe: 0 };
+  // Histerezis: azalış varsa önce probela, ikinci ölçümde de düşükse yayınla
+  if (nextCount < state.lastCount) {
+    if (!state.lastDecreaseProbe || (now - state.lastDecreaseProbe) > DECREASE_DELAY_MS) {
+      state.lastDecreaseProbe = now;
+      // ilk probede hemen yayınlama; bir sonrakini bekle
+      emitStateByShop.set(shopId, state);
+      return;
+    }
+  } else {
+    // artışta probe sıfırla
+    state.lastDecreaseProbe = 0;
+  }
+
+  const emitNow = now - state.lastEmit >= EMIT_MIN_INTERVAL_MS;
+  const doEmit = () => {
+    state.lastEmit = Date.now();
+    state.pending = null;
+    state.timer && clearTimeout(state.timer);
+    state.timer = null;
+    state.lastCount = nextCount;
+    io.to(`shop:${shopId}`).emit('active', { shopId, active: nextCount });
+  };
+
+  if (emitNow) {
+    doEmit();
+  } else {
+    state.pending = nextCount;
+    const wait = EMIT_MIN_INTERVAL_MS - (now - state.lastEmit);
+    state.timer && clearTimeout(state.timer);
+    state.timer = setTimeout(() => {
+      const latest = state.pending != null ? state.pending : state.lastCount;
+      state.pending = null;
+      doEmit(latest);
+    }, Math.max(0, wait));
+  }
+  emitStateByShop.set(shopId, state);
+}
+
 io.on('connection', (socket) => {
   let shopId = null;
   let sessionId = null;
@@ -159,7 +205,7 @@ io.on('connection', (socket) => {
       await presenceUpsert(shopId, member, now);
       socket.join(`shop:${shopId}`);
       const count = await presenceTrimAndCount(shopId, now);
-      io.to(`shop:${shopId}`).emit('active', { shopId, active: count });
+      scheduleActiveEmit(shopId, count);
     } catch (_e) {}
   });
 
@@ -181,7 +227,7 @@ io.on('connection', (socket) => {
     const now = Date.now();
     await presenceUpsert(shopId, `${sessionId}`, now);
     const count = await presenceTrimAndCount(shopId, now);
-    io.to(`shop:${shopId}`).emit('active', { shopId, active: count });
+    scheduleActiveEmit(shopId, count);
   });
 
   socket.on('disconnect', async () => {
@@ -189,7 +235,7 @@ io.on('connection', (socket) => {
     try {
       await presenceRemove(shopId, `${sessionId}`);
       const count = await presenceTrimAndCount(shopId, Date.now());
-      io.to(`shop:${shopId}`).emit('active', { shopId, active: count });
+      scheduleActiveEmit(shopId, count);
     } catch (_e) {}
   });
 });

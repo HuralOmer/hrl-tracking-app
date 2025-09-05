@@ -149,11 +149,19 @@ setInterval(async () => {
     try { window.watchCurrentShop = watch; } catch(e){}
     socket.on('connect', () => { __wsActive = true; watch(); });
     socket.on('disconnect', () => { __wsActive = false; });
+    // EMA yumuşatma + 1 sn throttle
+    let lastUi = 0; let ema = null; const ALPHA = 0.4; const UI_THROTTLE = 1000;
     socket.on('active', (msg) => {
       try {
         const current = (document.getElementById('shop').value || '').trim();
         if (msg && msg.shopId === current) {
-          document.getElementById('active').innerText = msg.active ?? 0;
+          const val = Number(msg.active ?? 0);
+          ema = ema == null ? val : Math.round(ALPHA*val + (1-ALPHA)*ema);
+          const now = Date.now();
+          if (now - lastUi >= UI_THROTTLE) {
+            lastUi = now;
+            document.getElementById('active').innerText = ema;
+          }
         }
       } catch(e){}
     });
