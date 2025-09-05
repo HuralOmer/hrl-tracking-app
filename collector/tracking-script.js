@@ -399,6 +399,17 @@
           if (window.io && socket && socket.connected) {
             socket.emit('ping');
           }
+          // WS yoksa HTTP heartbeat fallback
+          if (!socket || !socket.connected) {
+            try {
+              fetch((CONFIG.apiUrl.replace(/\/collect$/, '')) + '/hb', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                keepalive: true,
+                body: JSON.stringify({ shopId: CONFIG.shopId, sessionId: getSessionId() })
+              }).catch(()=>{});
+            } catch(_){}
+          }
         }
       }, PING_MS);
 

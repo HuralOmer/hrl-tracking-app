@@ -170,6 +170,22 @@ setInterval(async () => {
     watch();
     // olası oda kaybına karşı periyodik re-watch
     setInterval(watch, 10000);
+    // WS açıkken de periyodik REST senkronu (10 sn)
+    setInterval(async () => {
+      try {
+        const shop = (document.getElementById('shop').value || '').trim();
+        if (!shop) return;
+        const a = await fetch(`${api}/active?shopId=${encodeURIComponent(shop)}`).then(r=>r.json());
+        // EMA ile senkronla
+        const val = Number(a.active_users ?? 0);
+        ema = ema == null ? val : Math.round(0.4*val + 0.6*(ema ?? val));
+        const now = Date.now();
+        if (now - lastUi >= 1000) {
+          lastUi = now;
+          document.getElementById('active').innerText = ema;
+        }
+      } catch(e){}
+    }, 10000);
   } catch (e) {}
 })();
 </script>

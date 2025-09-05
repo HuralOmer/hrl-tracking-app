@@ -624,6 +624,23 @@ app.get('/auth/callback', async (req, res) => {
 // Stats API routes
 app.use('/stats', statsRoutes);
 
+// HTTP heartbeat fallback: /hb
+app.post('/hb', async (req, res) => {
+  try {
+    const shopId = (req.body && req.body.shopId) || '';
+    const sessionId = (req.body && req.body.sessionId) || '';
+    if (!shopId || !sessionId) return res.status(400).json({ ok: false, error: 'missing_params' });
+    const now = Date.now();
+    await presenceUpsert(shopId, String(sessionId), now);
+    const count = await presenceTrimAndCount(shopId, now);
+    scheduleActiveEmit(shopId, count);
+    return res.json({ ok: true, active: count });
+  } catch (e) {
+    console.error('hb error', e);
+    return res.status(500).json({ ok: false, error: 'server_error' });
+  }
+});
+
 // Sağlık uçları
 app.get(['/', '/health', '/healthz', '/ready'], (_req, res) => {
   res.json({ ok: true, message: 'collector alive', time: new Date().toISOString() });
