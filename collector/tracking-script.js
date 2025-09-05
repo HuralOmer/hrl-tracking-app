@@ -67,6 +67,7 @@
         if (!sid) { sid = generateId(); }
         writeCookie(COOKIE_SID, sid, 365);
         try { localStorage.setItem(SESSION_KEY, sid); } catch{}
+
         return sid;
       }
       // İzin yoksa: anonim, yalnızca oturum (sessionStorage) 
@@ -153,7 +154,8 @@
     try { sendEvent('page_view_start'); } catch(_e){}
     // heartbeat
     markPing();
-    setInterval(() => { markPing(); sendEvent('visit_heartbeat'); }, 5*1000);
+    const hbJitter = Math.random() * 5000;
+    setTimeout(() => setInterval(() => { markPing(); sendEvent('visit_heartbeat'); }, 5000), hbJitter);
     // görünür olduğunda ve odağa geldiğinde ekstra ping gönder
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') { markPing(); sendEvent('visit_heartbeat'); }
@@ -392,26 +394,29 @@
         document.head.appendChild(s);
       })();
 
-      setInterval(() => {
-        if (tryAcquire()) {
-          refresh();
-          ensureSocket();
-          if (window.io && socket && socket.connected) {
-            socket.emit('ping');
+      const __hrlStartJitter = Math.random() * PING_MS;
+      setTimeout(() => {
+        setInterval(() => {
+          if (tryAcquire()) {
+            refresh();
+            ensureSocket();
+            if (window.io && socket && socket.connected) {
+              socket.emit('ping');
+            }
+            // WS yoksa HTTP heartbeat fallback
+            if (!socket || !socket.connected) {
+              try {
+                fetch((CONFIG.apiUrl.replace(/\/collect$/, '')) + '/hb', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  keepalive: true,
+                  body: JSON.stringify({ shopId: CONFIG.shopId, sessionId: getSessionId() })
+                }).catch(()=>{});
+              } catch(_){}
+            }
           }
-          // WS yoksa HTTP heartbeat fallback
-          if (!socket || !socket.connected) {
-            try {
-              fetch((CONFIG.apiUrl.replace(/\/collect$/, '')) + '/hb', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                keepalive: true,
-                body: JSON.stringify({ shopId: CONFIG.shopId, sessionId: getSessionId() })
-              }).catch(()=>{});
-            } catch(_){}
-          }
-        }
-      }, PING_MS);
+        }, PING_MS);
+      }, __hrlStartJitter);
 
       // görünür/odak olduğunda anında ping
       try {

@@ -9,6 +9,8 @@ const { Pool } = require('pg');
 const statsRoutes = require('./stats-routes');
 const crypto = require('crypto');
 const { Server: IOServer } = require('socket.io');
+let createAdapter = null;
+try { createAdapter = require('@socket.io/redis-adapter').createAdapter; } catch (_) { /* optional */ }
 let UpstashRedis = null;
 try { UpstashRedis = require('@upstash/redis').Redis; } catch (_e) { /* optional */ }
 let Redis = null;
@@ -16,7 +18,7 @@ try { Redis = require('ioredis'); } catch (_e) { /* optional */ }
 
 const app = express();
 const server = http.createServer(app);
-const io = new IOServer(server, { cors: { origin: '*'} });
+const io = new IOServer(server, { cors: { origin: '*' } });
 
 // --- Dedup: Redis tercih; yoksa in-memory ---
 const DEDUP_TTL_MS = 1500; // 1.5 saniye
@@ -49,6 +51,22 @@ if (Redis) {
         try { redis.disconnect(); } catch(_) {}
         redis = null;
       });
+      // Socket.IO Redis adapter (opsiyonel)
+      if (createAdapter) {
+        try {
+          const pub = hasValidUrl ? new Redis(url) : new Redis({
+            host: process.env.REDIS_HOST,
+            port: Number(process.env.REDIS_PORT || 6379),
+            password: process.env.REDIS_PASSWORD || undefined,
+            tls: process.env.REDIS_TLS === '1' ? {} : undefined
+          });
+          const sub = pub.duplicate();
+          await pub.connect(); await sub.connect();
+          io.adapter(createAdapter(pub, sub));
+        } catch (e) {
+          console.warn('socket.io redis adapter init failed:', e && e.message);
+        }
+      }
     } catch (e) {
       console.warn('Redis init failed, fallback to memory:', e && e.message);
       redis = null;
@@ -70,8 +88,9 @@ if (UpstashRedis && (
 }
 
 const dedupCache = new Map();
-function dedupKey({ shopId, event, productHandle, buttonId }, ip) {
-  return [shopId, event, productHandle || '', buttonId || '', ip || ''].join('|');
+function dedupKey({ shopId, event, productHandle, buttonId, sid }, ip) {
+  // Aynı kullanıcı aynı olayı kısa sürede tekrar yollarsa yakala; farklı kullanıcılar asla çakışmasın
+  return [shopId, event, productHandle || '', buttonId || '', sid || '', ip || ''].join('|');
 }
 async function dedupCheckAndMark(key) {
   // Redis varsa SET NX EX ile atomik kontrol
@@ -93,7 +112,7 @@ async function dedupCheckAndMark(key) {
 }
 
 // --- Presence (aktif kullanıcılar) ---
-const PRESENCE_TTL_MS = 30_000; // aktif sayımı için 30 saniye penceresi
+const PRESENCE_TTL_MS = Number(process.env.PRESENCE_TTL_MS || 20_000);
 const DISCONNECT_GRACE_MS = 10_000; // kopuş sonrası ekstra görünürlük
 function presenceKey(shopId){ return `presence:${shopId}`; }
 
@@ -227,6 +246,18 @@ io.on('connection', (socket) => {
     if (!shopId || !sessionId) return;
     const now = Date.now();
     await presenceUpsert(shopId, `${sessionId}`, now);
+    // DB last_seen güncelle
+    try {
+      if (pool) {
+        await pool.query(
+          `insert into active_sessions (shop_id, session_id, active, last_seen)
+           values ($1,$2,true,now())
+           on conflict (shop_id, session_id)
+           do update set active=true, last_seen=excluded.last_seen`,
+          [shopId, sessionId]
+        );
+      }
+    } catch(_){}
     const count = await presenceTrimAndCount(shopId, now);
     scheduleActiveEmit(shopId, count);
   });
@@ -665,6 +696,17 @@ app.post('/hb', async (req, res) => {
     if (!shopId || !sessionId) return res.status(400).json({ ok: false, error: 'missing_params' });
     const now = Date.now();
     await presenceUpsert(shopId, String(sessionId), now);
+    try {
+      if (pool) {
+        await pool.query(
+          `insert into active_sessions (shop_id, session_id, active, last_seen)
+           values ($1,$2,true,now())
+           on conflict (shop_id, session_id)
+           do update set active=true, last_seen=excluded.last_seen`,
+          [shopId, sessionId]
+        );
+      }
+    } catch(_){}
     const count = await presenceTrimAndCount(shopId, now);
     scheduleActiveEmit(shopId, count);
     return res.json({ ok: true, active: count });
@@ -734,6 +776,7 @@ const COLLECT_PATHS = ['/collect', '/api/collect', '/collector/collect'];
 
 app.post(COLLECT_PATHS, async (req, res) => {
   const { shopId, event, productHandle, buttonId, extra } = req.body || {};
+  const sid = extra?.session_id || null;
 
   if (!shopId || !event) {
     return res.status(400).json({
@@ -745,7 +788,7 @@ app.post(COLLECT_PATHS, async (req, res) => {
 
   // Dedup koruması: aynı anahtardan kısa sürede tekrar gelirse atla
   try {
-    const key = dedupKey({ shopId, event, productHandle, buttonId }, req.ip);
+    const key = dedupKey({ shopId, event, productHandle, buttonId, sid }, req.ip);
     if (await dedupCheckAndMark(key)) {
       return res.json({ ok: true, dedup: true });
     }

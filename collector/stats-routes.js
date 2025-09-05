@@ -80,13 +80,16 @@ router.get('/debug', async (req, res) => {
   }
 });
 
-// Upstash/Redis tabanlı aktif kullanıcı sayımı (20 sn pencerede)
+// Upstash/Redis tabanlı aktif kullanıcı sayımı (env TTL penceresinde)
 router.get('/active-redis', async (req, res) => {
   try {
     const shopId = req.query.shopId;
     if (!shopId) return res.status(400).json({ error: 'shopId required' });
+    const winSec = Number(req.query.window || 0);
+    const ttlMs = Number(process.env.PRESENCE_TTL_MS || 20000);
+    const windowMs = winSec > 0 ? (winSec * 1000) : ttlMs;
     const now = Date.now();
-    const cutoff = now - 20_000;
+    const cutoff = now - windowMs;
     const key = presenceKey(shopId);
     if (upstash) {
       try {
@@ -249,10 +252,13 @@ router.get('/active', async (req, res) => {
     const shopId = req.query.shopId;
     if (!shopId) return res.status(400).json({ error: 'shopId required' });
 
+    const winSecParam = Number(req.query.window || 0);
+    const ttlSecDefault = Number(process.env.PRESENCE_TTL_MS || 20000) / 1000;
+    const ttlSec = winSecParam > 0 ? winSecParam : ttlSecDefault;
     const { rows } = await pool.query(
       `select count(*)::int as active_users
          from active_sessions
-         where shop_id=$1 and active=true and last_seen > now() - interval '20 seconds'`,
+         where shop_id=$1 and active=true and last_seen > now() - interval '${ttlSec} seconds'`,
       [shopId]
     );
     return res.json({ active_users: rows[0]?.active_users || 0 });
