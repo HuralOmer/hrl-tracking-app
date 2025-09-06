@@ -54,14 +54,16 @@ if (Redis) {
       // Socket.IO Redis adapter (opsiyonel)
       if (createAdapter) {
         try {
-          const pub = hasValidUrl ? new Redis(url) : new Redis({
+          const pub = hasValidUrl ? new Redis(url, { lazyConnect: true }) : new Redis({
             host: process.env.REDIS_HOST,
             port: Number(process.env.REDIS_PORT || 6379),
             password: process.env.REDIS_PASSWORD || undefined,
-            tls: process.env.REDIS_TLS === '1' ? {} : undefined
+            tls: process.env.REDIS_TLS === '1' ? {} : undefined,
+            lazyConnect: true
           });
           const sub = pub.duplicate();
-          // ioredis kendi otomatik bağlanır; açık await kullanmayalım
+          // bağlanmayı başlat (await etmiyoruz)
+          try { pub.connect().catch(()=>{}); sub.connect().catch(()=>{}); } catch(_) {}
           io.adapter(createAdapter(pub, sub));
         } catch (e) {
           console.warn('socket.io redis adapter init failed:', e && e.message);
