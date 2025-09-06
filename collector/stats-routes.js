@@ -96,6 +96,9 @@ router.get('/active-redis', async (req, res) => {
         await upstash.zremrangebyscore(key, 0, cutoff);
         const cnt = await upstash.zcount(key, cutoff, '+inf');
         const n = typeof cnt === 'number' ? cnt : (cnt?.result ?? 0);
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
         return res.json({ active_users: n, source: 'upstash' });
       } catch(_e) {}
     }
@@ -103,9 +106,15 @@ router.get('/active-redis', async (req, res) => {
       try {
         await redis.zremrangebyscore(key, 0, cutoff);
         const cnt = await redis.zcount(key, cutoff, '+inf');
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
         return res.json({ active_users: Number(cnt||0), source: 'redis' });
       } catch(_e) {}
     }
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
     return res.json({ active_users: 0, source: 'memory' });
   } catch (e) {
     console.error('active-redis error', e);
@@ -261,6 +270,9 @@ router.get('/active', async (req, res) => {
          where shop_id=$1 and active=true and last_seen > now() - interval '${ttlSec} seconds'`,
       [shopId]
     );
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
     return res.json({ active_users: rows[0]?.active_users || 0 });
   } catch (e) {
     console.error('active error', e);

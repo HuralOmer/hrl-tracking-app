@@ -42,6 +42,8 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
+if (!window.__HRL_DASH_INIT__) {
+  window.__HRL_DASH_INIT__ = true;
 const api = '/stats';
 function iso(d){ return d.toISOString().slice(0,10); }
 (function presetDates(){
@@ -188,6 +190,12 @@ setInterval(async () => {
     }, 10000);
   } catch (e) {}
 })();
+</script>
+<script>
+// Koruma: ikinci kez yüklenmeye çalışırsa hiçbir şey yapma
+if (window.__HRL_DASH_INIT__) {
+  // already initialized
+}
 </script>
 </body>
 </html>
