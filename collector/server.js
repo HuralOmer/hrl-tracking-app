@@ -17,8 +17,14 @@ let Redis = null;
 try { Redis = require('ioredis'); } catch (_e) { /* optional */ }
 
 const app = express();
+// HTTP caching/etag kapalı: dashboard polling'inde 304/ETag kafa karışıklığını önle
+try { app.disable('etag'); } catch(_) {}
 const server = http.createServer(app);
-const io = new IOServer(server, { cors: { origin: '*' } });
+const io = new IOServer(server, {
+  path: '/socket.io',
+  transports: ['websocket', 'polling'],
+  cors: { origin: '*' }
+});
 
 // --- Dedup: Redis tercih; yoksa in-memory ---
 const DEDUP_TTL_MS = 1500; // 1.5 saniye

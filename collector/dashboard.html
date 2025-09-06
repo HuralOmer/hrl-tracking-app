@@ -134,7 +134,7 @@ setInterval(async () => {
 // WS: aktif kullanıcıları canlı dinle
 (function(){
   try {
-    const socket = window.io ? window.io() : null;
+    const socket = window.io ? window.io(undefined, { path: '/socket.io', transports: ['websocket','polling'] }) : null;
     if (!socket) return;
     async function watch(){
       const shop = (document.getElementById('shop').value || '').trim();
