@@ -16,6 +16,29 @@ try { UpstashRedis = require('@upstash/redis').Redis; } catch (_e) { /* optional
 let Redis = null;
 try { Redis = require('ioredis'); } catch (_e) { /* optional */ }
 
+// ioredis yardımcıları
+function makeRedis(urlOrOpts, name) {
+  try {
+    const client = new Redis(urlOrOpts, {
+      lazyConnect: true,
+      enableReadyCheck: true,
+      maxRetriesPerRequest: null,
+      retryStrategy: (times) => Math.min(1000 * 2 ** times, 15000)
+    });
+    client.on('ready', () => console.log(`[redis:${name}] ready`));
+    client.on('error', (e) => console.warn(`[redis:${name}] error:`, e && e.message));
+    return client;
+  } catch(_) { return null; }
+}
+async function ensureConnect(client) {
+  if (!client) return;
+  if (client.status === 'ready') return;
+  if (client.status === 'connecting' || client.status === 'reconnecting') {
+    await new Promise((r)=> client.once('ready', r));
+    return;
+  }
+  await client.connect();
+}
 const app = express();
 // HTTP caching/etag kapalı: dashboard polling'inde 304/ETag kafa karışıklığını önle
 try { app.disable('etag'); } catch(_) {}
@@ -38,38 +61,37 @@ if (Redis) {
   const hasHost = Boolean((process.env.REDIS_HOST || '').trim());
   if (hasValidUrl || hasHost) {
     try {
-      redis = new Redis(hasValidUrl ? url : {
-        host: process.env.REDIS_HOST,
-        port: Number(process.env.REDIS_PORT || 6379),
-        password: process.env.REDIS_PASSWORD || undefined,
-        tls: process.env.REDIS_TLS === '1' ? {} : undefined,
-        lazyConnect: true,
-        enableOfflineQueue: false,
-        maxRetriesPerRequest: 0,
-        retryStrategy: () => null
-      });
-      redis.on('error', (e) => {
-        console.warn('Redis error:', e && e.message);
-      });
-      // Bağlantıyı dene; başarısızsa tamamen devre dışı bırak
-      redis.connect().catch((e) => {
-        console.warn('Redis connect failed, disabling:', e && e.message);
-        try { redis.disconnect(); } catch(_) {}
-        redis = null;
-      });
-      // Socket.IO Redis adapter (opsiyonel)
-      if (createAdapter) {
-        try {
-          const pub = hasValidUrl ? new Redis(url, { lazyConnect: true }) : new Redis({
+      redis = hasValidUrl
+        ? makeRedis(url, 'main')
+        : makeRedis({
             host: process.env.REDIS_HOST,
             port: Number(process.env.REDIS_PORT || 6379),
             password: process.env.REDIS_PASSWORD || undefined,
-            tls: process.env.REDIS_TLS === '1' ? {} : undefined,
-            lazyConnect: true
-          });
-          const sub = pub.duplicate();
-          // bağlanmayı başlat (await etmiyoruz)
-          try { pub.connect().catch(()=>{}); sub.connect().catch(()=>{}); } catch(_) {}
+            tls: process.env.REDIS_TLS === '1' ? {} : undefined
+          }, 'main');
+      try { await ensureConnect(redis); }
+      catch (e) {
+        if (/already (connecting|connected)/i.test(e && e.message)) {
+          await new Promise(r => redis.once('ready', r));
+        } else {
+          console.warn('Redis connect failed:', e && e.message);
+          try { redis.disconnect(); } catch(_) {}
+          redis = null;
+        }
+      }
+      // Socket.IO Redis adapter (opsiyonel)
+      if (createAdapter) {
+        try {
+          const pub = hasValidUrl
+            ? makeRedis(url, 'pub')
+            : makeRedis({
+                host: process.env.REDIS_HOST,
+                port: Number(process.env.REDIS_PORT || 6379),
+                password: process.env.REDIS_PASSWORD || undefined,
+                tls: process.env.REDIS_TLS === '1' ? {} : undefined
+              }, 'pub');
+          const sub = pub && pub.duplicate ? pub.duplicate() : null;
+          await Promise.all([ensureConnect(pub), ensureConnect(sub)]);
           io.adapter(createAdapter(pub, sub));
         } catch (e) {
           console.warn('socket.io redis adapter init failed:', e && e.message);
