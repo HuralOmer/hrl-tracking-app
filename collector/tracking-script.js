@@ -5,10 +5,6 @@
   // duplicate guard
   if (window.__HRL_TRACKING_LOADED__) { return; }
   window.__HRL_TRACKING_LOADED__ = true;
-  if (window.__HRL_TRACKING_LOADED__) {
-    return;
-  }
-  window.__HRL_TRACKING_LOADED__ = true;
   'use strict';
   
   // Configuration (CDN/asset üzerinden yüklense bile doğru APP_URL'e git)
