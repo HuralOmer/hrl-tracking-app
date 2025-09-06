@@ -69,16 +69,17 @@ if (Redis) {
             password: process.env.REDIS_PASSWORD || undefined,
             tls: process.env.REDIS_TLS === '1' ? {} : undefined
           }, 'main');
-      try { await ensureConnect(redis); }
-      catch (e) {
-        if (/already (connecting|connected)/i.test(e && e.message)) {
-          await new Promise(r => redis.once('ready', r));
-        } else {
-          console.warn('Redis connect failed:', e && e.message);
-          try { redis.disconnect(); } catch(_) {}
-          redis = null;
-        }
-      }
+      try {
+        ensureConnect(redis).catch((e) => {
+          if (/already (connecting|connected)/i.test(e && e.message)) {
+            try { redis.once('ready', () => {}); } catch(_) {}
+          } else {
+            console.warn('Redis connect failed:', e && e.message);
+            try { redis.disconnect(); } catch(_) {}
+            redis = null;
+          }
+        });
+      } catch (_) {}
       // Socket.IO Redis adapter (opsiyonel)
       if (createAdapter) {
         try {
@@ -91,7 +92,7 @@ if (Redis) {
                 tls: process.env.REDIS_TLS === '1' ? {} : undefined
               }, 'pub');
           const sub = pub && pub.duplicate ? pub.duplicate() : null;
-          await Promise.all([ensureConnect(pub), ensureConnect(sub)]);
+          try { Promise.all([ensureConnect(pub), ensureConnect(sub)]).catch(()=>{}); } catch(_) {}
           io.adapter(createAdapter(pub, sub));
         } catch (e) {
           console.warn('socket.io redis adapter init failed:', e && e.message);
