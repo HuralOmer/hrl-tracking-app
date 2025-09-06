@@ -162,10 +162,13 @@ startPolling();
     socket.on('disconnect', () => { __wsActive = false; startPolling(); });
     // EMA yumuşatma + 1 sn throttle
     let lastUi = 0; let ema = null; const ALPHA = 0.4; const UI_THROTTLE = 1000;
+    // WS sessizlik dedektörü (REST resync yalnızca WS uzun süre sessizse çalışsın)
+    let lastWsAt = 0;
     socket.on('active', (msg) => {
       try {
         const current = (document.getElementById('shop').value || '').trim();
         if (msg && msg.shopId === current) {
+          lastWsAt = Date.now();
           const val = Number(msg.active ?? 0);
           ema = ema == null ? val : Math.round(ALPHA*val + (1-ALPHA)*ema);
           const now = Date.now();
@@ -179,12 +182,16 @@ startPolling();
     document.getElementById('shop').addEventListener('change', watch);
     // İlk izleme (tek sefer). Periyodik re-watch KALDIRILDI (çift REST çağrısını önlemek için)
     watch();
-    // WS açıkken de periyodik REST senkronu (10 sn)
+    // WS açıkken yalnızca uzun süre (15 sn) WS olayı gelmezse REST ile senkronla (10 sn)
     setInterval(async () => {
       try {
+        if (!__wsActive) return;
+        if (Date.now() - lastWsAt < 15000) return;
         const shop = (document.getElementById('shop').value || '').trim();
         if (!shop) return;
-        const a = await fetch(`${api}/active?shopId=${encodeURIComponent(shop)}`).then(r=>r.json());
+        const r = await fetch(`${api}/active?shopId=${encodeURIComponent(shop)}`, { cache: 'no-store', headers:{ 'Accept':'application/json' } });
+        if (!r.ok) return;
+        const a = await r.json();
         // EMA ile senkronla
         const val = Number(a.active_users ?? 0);
         ema = ema == null ? val : Math.round(0.4*val + 0.6*(ema ?? val));

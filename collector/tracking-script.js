@@ -2,6 +2,9 @@
 // Bu script Shopify mağazalarında otomatik olarak çalışacak
 
 (function() {
+  // duplicate guard
+  if (window.__HRL_TRACKING_LOADED__) { return; }
+  window.__HRL_TRACKING_LOADED__ = true;
   if (window.__HRL_TRACKING_LOADED__) {
     return;
   }
