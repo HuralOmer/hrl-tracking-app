@@ -125,6 +125,11 @@ async function bootstrap(): Promise<void> {
       conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
     }
 
+    // Add cache control headers
+    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    reply.header('Pragma', 'no-cache');
+    reply.header('Expires', '0');
+    
     return reply.type('text/html').send(`
       <!DOCTYPE html>
       <html>
@@ -235,8 +240,14 @@ async function bootstrap(): Promise<void> {
           // Initial load
           fetchData();
 
-          // Auto-refresh every 10 seconds
-          setInterval(fetchData, 10000);
+          // Auto-refresh every 5 seconds (more aggressive)
+          setInterval(fetchData, 5000);
+          
+          // Debug: Log when auto-refresh runs
+          console.log('Dashboard auto-refresh started - every 5 seconds');
+          
+          // Force refresh on page focus
+          window.addEventListener('focus', fetchData);
         </script>
       </body>
       </html>
