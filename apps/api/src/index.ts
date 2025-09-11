@@ -299,7 +299,7 @@ async function bootstrap(): Promise<void> {
               document.getElementById('pageViewsChange').textContent = 'Updated ' + updateTime;
               document.getElementById('conversionRateChange').textContent = 'Updated ' + updateTime;
               
-              console.log('Dashboard updated:', data);
+              // Dashboard updated (console log removed for cleaner console)
               
             } catch (error) {
               console.error('Error fetching data:', error);
@@ -321,7 +321,7 @@ async function bootstrap(): Promise<void> {
           setInterval(fetchData, 5000);
           
           // Debug: Log when auto-refresh runs
-          console.log('Dashboard auto-refresh started - every 5 seconds');
+          // Dashboard auto-refresh started - every 5 seconds
           
           // Force refresh on page focus
           window.addEventListener('focus', fetchData);
