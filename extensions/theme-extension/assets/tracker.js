@@ -25,6 +25,23 @@
     return sessionId;
   }
   
+  // Presence heartbeat fonksiyonu
+  function sendPresenceHeartbeat() {
+    const sessionId = getSessionId();
+    const heartbeatData = {
+      shop: SHOP_DOMAIN,
+      session_id: sessionId,
+      ts: Date.now()
+    };
+
+    fetch(`${TRACKING_URL}/presence/beat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(heartbeatData),
+      keepalive: true
+    }).catch(() => {});
+  }
+
   // Track event
   function trackEvent(eventName, payload = {}) {
     const sessionId = getSessionId();
@@ -85,6 +102,12 @@
     // Track initial page view
     trackPageView();
     
+    // Send initial presence heartbeat
+    sendPresenceHeartbeat();
+    
+    // Start presence heartbeat (10 saniyede bir)
+    setInterval(sendPresenceHeartbeat, 10000);
+    
     // Track page changes (SPA support)
     let lastUrl = window.location.href;
     new MutationObserver(() => {
@@ -92,6 +115,8 @@
       if (url !== lastUrl) {
         lastUrl = url;
         trackPageView();
+        // Page değiştiğinde de heartbeat gönder
+        sendPresenceHeartbeat();
       }
     }).observe(document, { subtree: true, childList: true });
     
@@ -116,6 +141,18 @@
         trackCheckoutStarted();
       }
     });
+
+    // Visibility change - sayfa görünür olduğunda heartbeat gönder
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) {
+        sendPresenceHeartbeat();
+      }
+    });
+
+    // Focus - pencere odaklandığında heartbeat gönder
+    window.addEventListener('focus', function() {
+      sendPresenceHeartbeat();
+    });
   }
   
   // Start tracking when DOM is ready
@@ -131,6 +168,7 @@
     trackPageView,
     trackAddToCart,
     trackCheckoutStarted,
-    trackPurchase
+    trackPurchase,
+    sendPresenceHeartbeat
   };
 })();
