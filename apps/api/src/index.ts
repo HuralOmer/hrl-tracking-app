@@ -42,6 +42,29 @@ async function bootstrap(): Promise<void> {
   // Health check
   fastify.get('/health', async () => ({ ok: true }));
 
+  // Redis cleanup endpoint
+  fastify.post('/cleanup', async (req: any, reply: any) => {
+    if (!redis) {
+      return reply.send({ ok: true, note: 'no_redis' });
+    }
+
+    try {
+      const q = (req.query as any) as Record<string, string>;
+      const shop = q.shop as string || 'ecomxtrade.myshopify.com';
+      const key = `presence:${shop}`;
+      
+      if (useRest) {
+        await (redis as UpstashRedis).del(key);
+      } else {
+        await (redis as any).del(key);
+      }
+      
+      return reply.send({ ok: true, message: `Cleared presence data for ${shop}` });
+    } catch (err) {
+      return reply.code(500).send({ ok: false, error: 'cleanup_failed' });
+    }
+  });
+
   // Root route for embedded app - Dashboard
   fastify.get('/', async (req, reply) => {
     // Get real-time data
