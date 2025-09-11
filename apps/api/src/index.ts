@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import websocket from '@fastify/websocket';
 import { z } from 'zod';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
@@ -14,6 +15,9 @@ async function bootstrap(): Promise<void> {
     methods: ['GET', 'POST'],
     allowedHeaders: ['*'],
   });
+
+  // WebSocket support
+  await fastify.register(websocket);
 
   // Rate limiting - temporarily disabled (dependency not installed)
   // await fastify.register(rateLimit, {
@@ -360,6 +364,7 @@ async function bootstrap(): Promise<void> {
             <div class="endpoint">POST /collect - Collect tracking data</div>
             <div class="endpoint">POST /presence/beat - Presence heartbeat</div>
             <div class="endpoint">GET /presence/stream - Presence stream (SSE)</div>
+            <div class="endpoint">GET /ws - WebSocket real-time updates</div>
             <div class="endpoint">GET /app-proxy/presence - App proxy presence</div>
             <div class="endpoint">POST /app-proxy/collect - App proxy collect</div>
           </div>
@@ -428,6 +433,85 @@ async function bootstrap(): Promise<void> {
     }, 2000);
 
     (req.raw as any).on('close', () => clearInterval(interval));
+  });
+
+  // WebSocket endpoint for real-time updates
+  fastify.register(async function (fastify) {
+    fastify.get('/ws', { websocket: true }, (connection, req) => {
+      const q = (req.query as any) as Record<string, string>;
+      const shop = q.shop as string || 'ecomxtrade.myshopify.com';
+      
+      console.log('WebSocket connection established for shop:', shop);
+      
+      // Send initial data
+      const sendUpdate = async () => {
+        const now = Math.floor(Date.now() / 1000);
+        let activeUsers = 0;
+        let totalSessions = 0;
+        let pageViews = 0;
+        let conversionRate = 0;
+
+        // Get active users from Redis
+        if (redis) {
+          const key = `presence:${shop}`;
+          try {
+            if (useRest) {
+              await (redis as UpstashRedis).zremrangebyscore(key, 0, now - ACTIVE_WINDOW_SEC);
+              activeUsers = Number(await (redis as UpstashRedis).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf'));
+            } else {
+              await (redis as any).zremrangebyscore(key, 0, now - ACTIVE_WINDOW_SEC);
+              activeUsers = await (redis as any).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf');
+            }
+          } catch (err) {
+            fastify.log.error({ err }, 'Redis error in WebSocket');
+          }
+        }
+
+        // Get database stats if available
+        if (hasDb && pool) {
+          try {
+            const sessionRes = await pool.query('SELECT COUNT(*) as count FROM sessions WHERE last_seen > NOW() - INTERVAL \'24 hours\'');
+            totalSessions = parseInt(sessionRes.rows[0].count) || 0;
+            
+            const eventRes = await pool.query('SELECT COUNT(*) as count FROM events WHERE ts > NOW() - INTERVAL \'24 hours\' AND name = \'page_view\'');
+            pageViews = parseInt(eventRes.rows[0].count) || 0;
+            
+            const conversionRes = await pool.query('SELECT COUNT(*) as count FROM events WHERE ts > NOW() - INTERVAL \'24 hours\' AND name IN (\'add_to_cart\', \'checkout_started\', \'purchase\')');
+            const conversions = parseInt(conversionRes.rows[0].count) || 0;
+            conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
+          } catch (err) {
+            fastify.log.error({ err }, 'Database error in WebSocket');
+          }
+        }
+
+        const data = {
+          type: 'dashboard_update',
+          activeUsers,
+          totalSessions,
+          pageViews,
+          conversionRate,
+          timestamp: new Date().toISOString()
+        };
+
+        connection.socket.send(JSON.stringify(data));
+      };
+
+      // Send initial data
+      sendUpdate();
+
+      // Send updates every 5 seconds
+      const interval = setInterval(sendUpdate, 5000);
+
+      connection.socket.on('close', () => {
+        console.log('WebSocket connection closed for shop:', shop);
+        clearInterval(interval);
+      });
+
+      connection.socket.on('error', (err) => {
+        console.error('WebSocket error:', err);
+        clearInterval(interval);
+      });
+    });
   });
 
   // Collect endpoint
