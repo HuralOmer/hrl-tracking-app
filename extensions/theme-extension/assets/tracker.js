@@ -14,11 +14,17 @@
       return v.toString(16);
     });
   }
+
+  // Validate UUID format
+  function isValidUUID(uuid) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    return uuidRegex.test(uuid);
+  }
   
   // Get or create session ID
   function getSessionId() {
     let sessionId = localStorage.getItem('ecomxtrade_session_id');
-    if (!sessionId) {
+    if (!sessionId || !isValidUUID(sessionId)) {
       sessionId = generateSessionId();
       localStorage.setItem('ecomxtrade_session_id', sessionId);
     }
@@ -39,7 +45,9 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(heartbeatData),
       keepalive: true
-    }).catch(() => {});
+    }).catch(err => {
+      console.warn('Presence heartbeat failed:', err.message);
+    });
   }
 
   // Track event
@@ -66,7 +74,9 @@
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(eventData)
-    }).catch(err => console.log('Tracking error:', err));
+    }).catch(err => {
+      console.error('Event tracking failed:', err.message);
+    });
   }
   
   // Track page view

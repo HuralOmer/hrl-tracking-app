@@ -15,6 +15,13 @@ async function bootstrap(): Promise<void> {
     allowedHeaders: ['*'],
   });
 
+  // Rate limiting - temporarily disabled (dependency not installed)
+  // await fastify.register(rateLimit, {
+  //   max: 100, // 100 requests per windowMs
+  //   timeWindow: '1 minute',
+  //   skipOnError: true,
+  // });
+
   // DB bağlantısı opsiyonel: DEV ortamında DATABASE_URL yoksa graceful degrade
   const hasDb = !!process.env.DATABASE_URL;
   const pool = hasDb ? new Pool({ connectionString: process.env.DATABASE_URL }) : null as unknown as Pool;
@@ -88,7 +95,7 @@ async function bootstrap(): Promise<void> {
           activeUsers = await (redis as any).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf');
         }
       } catch (err) {
-        console.log('Redis error:', err);
+        fastify.log.error({ err }, 'Redis error in active users calculation');
       }
     }
 
@@ -284,7 +291,11 @@ async function bootstrap(): Promise<void> {
   // Presence beat endpoint
   fastify.post('/presence/beat', async (req: any, reply: any) => {
     const body = z
-      .object({ shop: z.string(), session_id: z.string(), ts: z.number() })
+      .object({ 
+        shop: z.string().min(1).max(255), 
+        session_id: z.string().uuid(), 
+        ts: z.number().positive() 
+      })
       .parse(req.body);
     
     if (!redis) {
@@ -383,23 +394,7 @@ async function bootstrap(): Promise<void> {
     reply.send({ ok: true });
   });
 
-  // App Proxy endpoints
-  function verifyAppProxySignature(req: any): boolean {
-    const url = req.raw.url as string;
-    const parsed = req.query as Record<string, any>;
-    if (parsed?.dev === '1') return true; // dev bypass
-    const provided = parsed?.signature as string | undefined;
-    const secret = process.env.APP_PROXY_SECRET;
-    if (!secret || !provided) return false;
-    const canonical = Object.entries(parsed)
-      .filter(([k]) => k !== 'signature')
-      .map(([k, v]) => [k, Array.isArray(v) ? v.join(',') : String(v)])
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([k, v]) => `${k}=${v}`)
-      .join('&');
-    const h = crypto.createHmac('sha256', secret).update(canonical).digest('hex');
-    return h.toLowerCase() === String(provided).toLowerCase();
-  }
+  // App Proxy endpoints - Signature verification removed for tracking code compatibility
 
   // App Proxy presence endpoint
   fastify.get('/app-proxy/presence', async (req: any, reply: any) => {
@@ -443,19 +438,21 @@ async function bootstrap(): Promise<void> {
   // App Proxy collect endpoint
   fastify.post('/app-proxy/collect', async (req: any, reply: any) => {
     try {
-      if (!verifyAppProxySignature(req)) {
-        return reply.code(401).send({ ok: false, error: 'invalid_signature' });
-      }
+      // Signature kontrolünü kaldırdık - tracking kodu için
 
       const body = z.object({
-        event: z.string(),
-        ts: z.number().optional(),
-        session_id: z.string(),
-        shop_domain: z.string(),
-        page: z.object({ path: z.string().optional(), title: z.string().optional(), ref: z.string().optional() }).optional(),
-        duration_ms: z.number().optional(),
+        event: z.string().min(1).max(100),
+        ts: z.number().positive().optional(),
+        session_id: z.string().uuid(),
+        shop_domain: z.string().min(1).max(255),
+        page: z.object({ 
+          path: z.string().max(1000).optional(), 
+          title: z.string().max(500).optional(), 
+          ref: z.string().max(1000).optional() 
+        }).optional(),
+        duration_ms: z.number().positive().optional(),
         payload: z.any().optional(),
-        event_id: z.string().optional(),
+        event_id: z.string().max(100).optional(),
       }).parse(req.body);
 
       if (!hasDb) {
