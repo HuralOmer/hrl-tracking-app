@@ -437,7 +437,7 @@ async function bootstrap(): Promise<void> {
 
   // WebSocket endpoint for real-time updates
   fastify.register(async function (fastify) {
-    fastify.get('/ws', { websocket: true }, (connection, req) => {
+    fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
       const q = (req.query as any) as Record<string, string>;
       const shop = q.shop as string || 'ecomxtrade.myshopify.com';
       
@@ -493,7 +493,7 @@ async function bootstrap(): Promise<void> {
           timestamp: new Date().toISOString()
         };
 
-        connection.socket.send(JSON.stringify(data));
+        connection.socket.write(JSON.stringify(data));
       };
 
       // Send initial data
@@ -507,7 +507,7 @@ async function bootstrap(): Promise<void> {
         clearInterval(interval);
       });
 
-      connection.socket.on('error', (err) => {
+      connection.socket.on('error', (err: any) => {
         console.error('WebSocket error:', err);
         clearInterval(interval);
       });
