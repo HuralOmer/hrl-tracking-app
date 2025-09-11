@@ -6,6 +6,11 @@
   const TRACKING_URL = 'https://hrl-tracking-app-production.up.railway.app';
   const SHOP_DOMAIN = window.location.hostname;
   
+  // Leader tab management
+  let isLeaderTab = false;
+  let leaderTabId = null;
+  let heartbeatInterval = null;
+  
   // Generate session ID (UUID format)
   function generateSessionId() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -30,9 +35,63 @@
     }
     return sessionId;
   }
+
+  // Leader tab management
+  function initializeLeaderTab() {
+    const tabId = 'tab_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    // Check if there's already a leader tab
+    const existingLeader = localStorage.getItem('ecomxtrade_leader_tab');
+    const leaderTimestamp = localStorage.getItem('ecomxtrade_leader_timestamp');
+    const now = Date.now();
+    
+    // If no leader or leader is inactive (older than 30 seconds), become leader
+    if (!existingLeader || !leaderTimestamp || (now - parseInt(leaderTimestamp)) > 30000) {
+      localStorage.setItem('ecomxtrade_leader_tab', tabId);
+      localStorage.setItem('ecomxtrade_leader_timestamp', now.toString());
+      isLeaderTab = true;
+      leaderTabId = tabId;
+      console.log('Became leader tab:', tabId);
+    } else {
+      isLeaderTab = false;
+      leaderTabId = existingLeader;
+      console.log('Following leader tab:', existingLeader);
+    }
+    
+    // Update leader timestamp every 10 seconds
+    if (isLeaderTab) {
+      setInterval(() => {
+        localStorage.setItem('ecomxtrade_leader_timestamp', Date.now().toString());
+      }, 10000);
+    }
+  }
+
+  // Check if current tab is still leader
+  function checkLeaderStatus() {
+    const currentLeader = localStorage.getItem('ecomxtrade_leader_tab');
+    const leaderTimestamp = localStorage.getItem('ecomxtrade_leader_timestamp');
+    const now = Date.now();
+    
+    if (isLeaderTab && currentLeader === leaderTabId) {
+      // Still leader, update timestamp
+      localStorage.setItem('ecomxtrade_leader_timestamp', now.toString());
+    } else if (isLeaderTab && currentLeader !== leaderTabId) {
+      // Lost leadership
+      isLeaderTab = false;
+      console.log('Lost leadership to:', currentLeader);
+    } else if (!isLeaderTab && (!currentLeader || (now - parseInt(leaderTimestamp)) > 30000)) {
+      // Leader is inactive, become new leader
+      initializeLeaderTab();
+    }
+  }
   
-  // Presence heartbeat fonksiyonu
+  // Presence heartbeat fonksiyonu (sadece lider sekme)
   function sendPresenceHeartbeat() {
+    // Only send heartbeat if this is the leader tab
+    if (!isLeaderTab) {
+      return;
+    }
+    
     const sessionId = getSessionId();
     const heartbeatData = {
       shop: SHOP_DOMAIN,
@@ -109,14 +168,20 @@
   
   // Initialize tracking
   function initTracking() {
+    // Initialize leader tab management
+    initializeLeaderTab();
+    
     // Track initial page view
     trackPageView();
     
-    // Send initial presence heartbeat
+    // Send initial presence heartbeat (only if leader)
     sendPresenceHeartbeat();
     
-    // Start presence heartbeat (10 saniyede bir)
-    setInterval(sendPresenceHeartbeat, 10000);
+    // Start presence heartbeat (10 saniyede bir) - only leader tab
+    heartbeatInterval = setInterval(() => {
+      checkLeaderStatus();
+      sendPresenceHeartbeat();
+    }, 10000);
     
     // Track page changes (SPA support)
     let lastUrl = window.location.href;
