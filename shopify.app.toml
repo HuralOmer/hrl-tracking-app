@@ -1,0 +1,27 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+name = "ecomxtrade-tracking-app"
+client_id = "ed09709de1f0816e66d4ff122907cbba"
+application_url = "https://hrl-tracking-app-production.up.railway.app"
+embedded = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products,read_orders,write_orders,read_customers,write_customers,read_analytics"
+
+[auth]
+redirect_urls = [
+  "https://hrl-tracking-app-production.up.railway.app/auth/callback",
+  "https://hrl-tracking-app-production.up.railway.app/auth/shopify/callback",
+  "https://hrl-tracking-app-production.up.railway.app/api/auth/callback"
+]
+
+[webhooks]
+api_version = "2023-10"
+
+[pos]
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "fioara.myshopify.com"
