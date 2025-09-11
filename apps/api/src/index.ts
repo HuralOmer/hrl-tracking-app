@@ -42,6 +42,59 @@ async function bootstrap(): Promise<void> {
   // Health check
   fastify.get('/health', async () => ({ ok: true }));
 
+  // Root route for embedded app
+  fastify.get('/', async (req, reply) => {
+    return reply.send({
+      message: 'EcomXtrade Tracking App is running',
+      status: 'active',
+      timestamp: new Date().toISOString(),
+      version: '1.0.0'
+    });
+  });
+
+  // Admin dashboard route
+  fastify.get('/admin', async (req, reply) => {
+    return reply.type('text/html').send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>EcomXtrade Tracking Admin</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+          .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+          h1 { color: #333; margin-bottom: 20px; }
+          .status { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .endpoints { background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }
+          .endpoint { margin: 10px 0; font-family: monospace; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>🎯 EcomXtrade Tracking App</h1>
+          <div class="status">
+            <strong>Status:</strong> Active and Running<br>
+            <strong>Version:</strong> 1.0.0<br>
+            <strong>Last Updated:</strong> ${new Date().toLocaleString()}
+          </div>
+          <div class="endpoints">
+            <h3>Available Endpoints:</h3>
+            <div class="endpoint">GET / - Root endpoint</div>
+            <div class="endpoint">GET /health - Health check</div>
+            <div class="endpoint">POST /collect - Collect tracking data</div>
+            <div class="endpoint">POST /presence/beat - Presence heartbeat</div>
+            <div class="endpoint">GET /presence/stream - Presence stream (SSE)</div>
+            <div class="endpoint">GET /app-proxy/presence - App proxy presence</div>
+            <div class="endpoint">POST /app-proxy/collect - App proxy collect</div>
+          </div>
+          <p><strong>Note:</strong> This is the admin dashboard for the EcomXtrade Tracking App. The app is configured to work with Shopify stores and collect visitor tracking data.</p>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+
   // Presence beat endpoint
   fastify.post('/presence/beat', async (req: any, reply: any) => {
     const body = z
