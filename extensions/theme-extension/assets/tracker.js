@@ -60,7 +60,7 @@
     };
     
     // Send to tracking endpoint
-    fetch(`${TRACKING_URL}/collect`, {
+    fetch(`${TRACKING_URL}/app-proxy/collect`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
