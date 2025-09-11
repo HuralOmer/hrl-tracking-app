@@ -42,14 +42,33 @@ async function bootstrap(): Promise<void> {
   // Health check
   fastify.get('/health', async () => ({ ok: true }));
 
-  // Root route for embedded app
+  // Root route for embedded app - Dashboard
   fastify.get('/', async (req, reply) => {
-    return reply.send({
-      message: 'EcomXtrade Tracking App is running',
-      status: 'active',
-      timestamp: new Date().toISOString(),
-      version: '1.0.0'
-    });
+    return reply.type('text/html').send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>EcomXtrade Tracking</title>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+          .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; }
+          h1 { color: #333; }
+          .status { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>🎯 EcomXtrade Tracking</h1>
+          <div class="status">
+            <strong>Status:</strong> Active<br>
+            <strong>Version:</strong> 1.0.0<br>
+            <strong>Time:</strong> ${new Date().toLocaleString()}
+          </div>
+          <p>Your tracking app is running successfully!</p>
+        </div>
+      </body>
+      </html>
+    `);
   });
 
   // Admin dashboard route
