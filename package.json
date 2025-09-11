@@ -1,0 +1,21 @@
+{
+  "name": "shopify-tracking-app",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter \"./apps/*\" dev",
+    "dev:api": "pnpm --filter @apps/api dev",
+    "dev:admin": "pnpm --filter @apps/admin dev",
+    "build": "pnpm --filter \"./apps/*\" build",
+    "start": "pnpm --filter @apps/api start",
+    "typecheck": "pnpm --filter \"./apps/*\" typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

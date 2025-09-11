@@ -1,0 +1,14 @@
+{
+  "name": "@packages/tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/tracker.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
