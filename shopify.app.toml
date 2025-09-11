@@ -25,3 +25,9 @@ embedded = false
 [build]
 automatically_update_urls_on_dev = true
 dev_store_url = "fioara.myshopify.com"
+
+# App Proxy ayarları - First-party cookie için gerekli
+[app_proxy]
+url = "https://hrl-tracking-app-production.up.railway.app"
+subpath = "tracking"
+prefix = "apps"
