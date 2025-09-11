@@ -159,24 +159,24 @@ async function bootstrap(): Promise<void> {
           
           <div class="stats-grid">
             <div class="stat-card">
-              <div class="stat-value" id="activeUsers">${activeUsers}</div>
+              <div class="stat-value" id="activeUsers">Loading...</div>
               <div class="stat-label">Active Users</div>
-              <div class="stat-change positive">+12% from yesterday</div>
+              <div class="stat-change" id="activeUsersChange">Real-time data</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value" id="totalSessions">${totalSessions}</div>
+              <div class="stat-value" id="totalSessions">Loading...</div>
               <div class="stat-label">Total Sessions (24h)</div>
-              <div class="stat-change positive">+8% from yesterday</div>
+              <div class="stat-change" id="totalSessionsChange">Real-time data</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value" id="pageViews">${pageViews}</div>
+              <div class="stat-value" id="pageViews">Loading...</div>
               <div class="stat-label">Page Views (24h)</div>
-              <div class="stat-change positive">+15% from yesterday</div>
+              <div class="stat-change" id="pageViewsChange">Real-time data</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value" id="conversionRate">${conversionRate}%</div>
+              <div class="stat-value" id="conversionRate">Loading...</div>
               <div class="stat-label">Conversion Rate</div>
-              <div class="stat-change positive">+2.1% from yesterday</div>
+              <div class="stat-change" id="conversionRateChange">Real-time data</div>
             </div>
           </div>
 
@@ -201,14 +201,37 @@ async function bootstrap(): Promise<void> {
         </div>
 
         <script>
-          function refreshData() {
-            location.reload();
+          // Real-time data fetching
+          async function fetchData() {
+            try {
+              // Fetch active users
+              const presenceResponse = await fetch('/app-proxy/presence?shop=ecomxtrade.myshopify.com');
+              const presenceData = await presenceResponse.json();
+              
+              // Update active users
+              document.getElementById('activeUsers').textContent = presenceData.current || 0;
+              document.getElementById('activeUsersChange').textContent = 'Real-time data';
+              
+              // Fetch other stats (placeholder for now)
+              document.getElementById('totalSessions').textContent = '0';
+              document.getElementById('pageViews').textContent = '0';
+              document.getElementById('conversionRate').textContent = '0';
+              
+            } catch (error) {
+              console.error('Error fetching data:', error);
+              document.getElementById('activeUsers').textContent = 'Error';
+            }
           }
-          
-          // Auto-refresh every 30 seconds
-          setInterval(() => {
-            location.reload();
-          }, 30000);
+
+          function refreshData() {
+            fetchData();
+          }
+
+          // Initial load
+          fetchData();
+
+          // Auto-refresh every 10 seconds
+          setInterval(fetchData, 10000);
         </script>
       </body>
       </html>
