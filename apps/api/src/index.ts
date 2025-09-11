@@ -224,12 +224,35 @@ async function bootstrap(): Promise<void> {
               document.getElementById('activeUsers').textContent = presenceData.current || 0;
               document.getElementById('activeUsersChange').textContent = 'Real-time data';
               
-              // Use server-side rendered data (already available in the page)
-              // No need to fetch again - just use the initial values
+              // Fetch fresh dashboard data to get updated page views, sessions, etc.
+              const dashboardResponse = await fetch('/?t=' + Date.now()); // Cache busting
+              const dashboardText = await dashboardResponse.text();
+              
+              // Parse the fresh dashboard HTML
+              const parser = new DOMParser();
+              const doc = parser.parseFromString(dashboardText, 'text/html');
+              
+              // Extract updated values
+              const newTotalSessions = doc.querySelector('#totalSessions')?.textContent || '0';
+              const newPageViews = doc.querySelector('#pageViews')?.textContent || '0';
+              const newConversionRate = doc.querySelector('#conversionRate')?.textContent || '0%';
+              
+              // Update the page with fresh data
+              document.getElementById('totalSessions').textContent = newTotalSessions;
+              document.getElementById('pageViews').textContent = newPageViews;
+              document.getElementById('conversionRate').textContent = newConversionRate;
+              
+              // Update change indicators
+              document.getElementById('totalSessionsChange').textContent = 'Updated ' + new Date().toLocaleTimeString();
+              document.getElementById('pageViewsChange').textContent = 'Updated ' + new Date().toLocaleTimeString();
+              document.getElementById('conversionRateChange').textContent = 'Updated ' + new Date().toLocaleTimeString();
               
             } catch (error) {
               console.error('Error fetching data:', error);
               document.getElementById('activeUsers').textContent = 'Error';
+              document.getElementById('totalSessions').textContent = 'Error';
+              document.getElementById('pageViews').textContent = 'Error';
+              document.getElementById('conversionRate').textContent = 'Error';
             }
           }
 
