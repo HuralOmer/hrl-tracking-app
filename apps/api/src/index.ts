@@ -358,10 +358,7 @@ async function bootstrap(): Promise<void> {
   // App Proxy presence endpoint
   fastify.get('/app-proxy/presence', async (req: any, reply: any) => {
     try {
-      if (!verifyAppProxySignature(req)) {
-        return reply.code(401).send({ ok: false, error: 'invalid_signature' });
-      }
-
+      // Signature kontrolünü kaldırdık - tracking kodu için
       const q = (req.query as any) as Record<string, string>;
       const shop = q.shop as string;
       if (!shop) return reply.code(400).send({ ok: false, error: 'shop_required' });
