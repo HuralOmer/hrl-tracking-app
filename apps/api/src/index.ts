@@ -112,7 +112,7 @@ async function bootstrap(): Promise<void> {
         const conversions = parseInt(conversionRes.rows[0].count) || 0;
         conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
       } catch (err) {
-        console.log('Database error:', err);
+        fastify.log.error({ err }, 'Database error in dashboard stats');
         // Fallback to demo data
         totalSessions = Math.floor(Math.random() * 500) + 100;
         pageViews = Math.floor(Math.random() * 2000) + 500;
@@ -166,24 +166,24 @@ async function bootstrap(): Promise<void> {
           
           <div class="stats-grid">
             <div class="stat-card">
-              <div class="stat-value" id="activeUsers">Loading...</div>
+              <div class="stat-value" id="activeUsers">${activeUsers}</div>
               <div class="stat-label">Active Users</div>
               <div class="stat-change" id="activeUsersChange">Real-time data</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value" id="totalSessions">Loading...</div>
+              <div class="stat-value" id="totalSessions">${totalSessions}</div>
               <div class="stat-label">Total Sessions (24h)</div>
-              <div class="stat-change" id="totalSessionsChange">Real-time data</div>
+              <div class="stat-change" id="totalSessionsChange">Last 24 hours</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value" id="pageViews">Loading...</div>
+              <div class="stat-value" id="pageViews">${pageViews}</div>
               <div class="stat-label">Page Views (24h)</div>
-              <div class="stat-change" id="pageViewsChange">Real-time data</div>
+              <div class="stat-change" id="pageViewsChange">Last 24 hours</div>
             </div>
             <div class="stat-card">
-              <div class="stat-value" id="conversionRate">Loading...</div>
+              <div class="stat-value" id="conversionRate">${conversionRate}%</div>
               <div class="stat-label">Conversion Rate</div>
-              <div class="stat-change" id="conversionRateChange">Real-time data</div>
+              <div class="stat-change" id="conversionRateChange">Last 24 hours</div>
             </div>
           </div>
 
@@ -219,32 +219,12 @@ async function bootstrap(): Promise<void> {
               document.getElementById('activeUsers').textContent = presenceData.current || 0;
               document.getElementById('activeUsersChange').textContent = 'Real-time data';
               
-              // Fetch dashboard data (includes total sessions, page views, conversion rate)
-              const dashboardResponse = await fetch('/');
-              const dashboardText = await dashboardResponse.text();
-              
-              // Parse dashboard data from server-side rendered content
-              // This is a simple approach - in production you'd want a proper API endpoint
-              const tempDiv = document.createElement('div');
-              tempDiv.innerHTML = dashboardText;
-              
-              // Extract data from server-side rendered dashboard
-              const serverActiveUsers = tempDiv.querySelector('#activeUsers')?.textContent || '0';
-              const serverTotalSessions = tempDiv.querySelector('#totalSessions')?.textContent || '0';
-              const serverPageViews = tempDiv.querySelector('#pageViews')?.textContent || '0';
-              const serverConversionRate = tempDiv.querySelector('#conversionRate')?.textContent || '0';
-              
-              // Update with real data
-              document.getElementById('totalSessions').textContent = serverTotalSessions;
-              document.getElementById('pageViews').textContent = serverPageViews;
-              document.getElementById('conversionRate').textContent = serverConversionRate;
+              // Use server-side rendered data (already available in the page)
+              // No need to fetch again - just use the initial values
               
             } catch (error) {
               console.error('Error fetching data:', error);
               document.getElementById('activeUsers').textContent = 'Error';
-              document.getElementById('totalSessions').textContent = 'Error';
-              document.getElementById('pageViews').textContent = 'Error';
-              document.getElementById('conversionRate').textContent = 'Error';
             }
           }
 
