@@ -219,14 +219,32 @@ async function bootstrap(): Promise<void> {
               document.getElementById('activeUsers').textContent = presenceData.current || 0;
               document.getElementById('activeUsersChange').textContent = 'Real-time data';
               
-              // Fetch other stats (placeholder for now)
-              document.getElementById('totalSessions').textContent = '0';
-              document.getElementById('pageViews').textContent = '0';
-              document.getElementById('conversionRate').textContent = '0';
+              // Fetch dashboard data (includes total sessions, page views, conversion rate)
+              const dashboardResponse = await fetch('/');
+              const dashboardText = await dashboardResponse.text();
+              
+              // Parse dashboard data from server-side rendered content
+              // This is a simple approach - in production you'd want a proper API endpoint
+              const tempDiv = document.createElement('div');
+              tempDiv.innerHTML = dashboardText;
+              
+              // Extract data from server-side rendered dashboard
+              const serverActiveUsers = tempDiv.querySelector('#activeUsers')?.textContent || '0';
+              const serverTotalSessions = tempDiv.querySelector('#totalSessions')?.textContent || '0';
+              const serverPageViews = tempDiv.querySelector('#pageViews')?.textContent || '0';
+              const serverConversionRate = tempDiv.querySelector('#conversionRate')?.textContent || '0';
+              
+              // Update with real data
+              document.getElementById('totalSessions').textContent = serverTotalSessions;
+              document.getElementById('pageViews').textContent = serverPageViews;
+              document.getElementById('conversionRate').textContent = serverConversionRate;
               
             } catch (error) {
               console.error('Error fetching data:', error);
               document.getElementById('activeUsers').textContent = 'Error';
+              document.getElementById('totalSessions').textContent = 'Error';
+              document.getElementById('pageViews').textContent = 'Error';
+              document.getElementById('conversionRate').textContent = 'Error';
             }
           }
 
