@@ -706,10 +706,10 @@ async function bootstrap(): Promise<void> {
         
         const userId = `user_${userFingerprint}`;
         
-        // Insert user session (her oturum ayrı kayıt, ama aynı user_id)
         // Her girişte yeni session_id oluştur
         const newSessionId = crypto.randomUUID();
         
+        // Insert user session (her oturum ayrı kayıt)
         const { error: userError } = await supabase
           .from('users')
           .insert({
@@ -717,6 +717,7 @@ async function bootstrap(): Promise<void> {
             shop_id: shopId,
             user_id: userId,
             session_id: newSessionId,
+            user_fingerprint: userFingerprint,
             ip_address: ip,
             user_agent: ua,
             first_seen: new Date().toISOString(),
@@ -725,6 +726,27 @@ async function bootstrap(): Promise<void> {
         
         if (userError) {
           fastify.log.error({ err: userError }, 'Supabase user insert error');
+        }
+
+        // Upsert user visit (kullanıcı ziyaret sayısını takip et)
+        const { error: visitError } = await supabase
+          .from('user_visits')
+          .upsert({
+            shop_id: shopId,
+            user_fingerprint: userFingerprint,
+            visit_count: 1,
+            first_visit: new Date().toISOString(),
+            last_visit: new Date().toISOString(),
+            total_page_views: 1,
+            device_type: 'desktop', // Basit device detection
+            browser: ua?.split(' ')[0] || 'unknown'
+          }, { 
+            onConflict: 'shop_id,user_fingerprint',
+            ignoreDuplicates: false 
+          });
+        
+        if (visitError) {
+          fastify.log.error({ err: visitError }, 'Supabase user visit upsert error');
         }
 
         // Insert event
@@ -888,10 +910,10 @@ async function bootstrap(): Promise<void> {
           
           const userId = `user_${userFingerprint}`;
           
-          // Insert user session (her oturum ayrı kayıt, ama aynı user_id)
           // Her girişte yeni session_id oluştur
           const newSessionId = crypto.randomUUID();
           
+          // Insert user session (her oturum ayrı kayıt)
           const { error: userError } = await supabase
             .from('users')
             .insert({
@@ -899,6 +921,7 @@ async function bootstrap(): Promise<void> {
               shop_id: shopId,
               user_id: userId,
               session_id: newSessionId,
+              user_fingerprint: userFingerprint,
               ip_address: ip,
               user_agent: ua,
               first_seen: new Date().toISOString(),
@@ -907,6 +930,27 @@ async function bootstrap(): Promise<void> {
           
           if (userError) {
             fastify.log.error({ err: userError }, 'Supabase user insert error (app-proxy)');
+          }
+
+          // Upsert user visit (kullanıcı ziyaret sayısını takip et)
+          const { error: visitError } = await supabase
+            .from('user_visits')
+            .upsert({
+              shop_id: shopId,
+              user_fingerprint: userFingerprint,
+              visit_count: 1,
+              first_visit: new Date().toISOString(),
+              last_visit: new Date().toISOString(),
+              total_page_views: 1,
+              device_type: 'desktop', // Basit device detection
+              browser: ua?.split(' ')[0] || 'unknown'
+            }, { 
+              onConflict: 'shop_id,user_fingerprint',
+              ignoreDuplicates: false 
+            });
+          
+          if (visitError) {
+            fastify.log.error({ err: visitError }, 'Supabase user visit upsert error (app-proxy)');
           }
 
           // Insert event
