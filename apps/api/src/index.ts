@@ -875,12 +875,20 @@ async function bootstrap(): Promise<void> {
           const sessionId = body.session_id;
           
           // Bu session daha önce var mı kontrol et
-          const { data: existingSession } = await supabase
+          const { data: existingSession, error: sessionCheckError } = await supabase
             .from('users')
             .select('id')
             .eq('session_id', sessionId)
             .eq('shop_id', shopId)
-            .single();
+            .maybeSingle();
+          
+          // Debug: Session kontrolü
+          fastify.log.info({ 
+            sessionId, 
+            shopId, 
+            existingSession: !!existingSession,
+            sessionCheckError 
+          }, 'Session check result');
           
           // Sadece yeni session ise user kaydı oluştur
           if (!existingSession) {
