@@ -1214,6 +1214,17 @@ async function bootstrap(): Promise<void> {
         event_id: z.string().max(100).optional(),
       }).parse(req.body);
 
+      // Debug: Hangi veritabanının kullanıldığını kontrol et
+      console.log('🔍 DATABASE DEBUG:', {
+        hasSupabase: !!supabase,
+        hasDb: hasDb,
+        hasPool: !!pool,
+        supabaseUrl: process.env.SUPABASE_URL ? 'SET' : 'NOT_SET',
+        databaseUrl: process.env.DATABASE_URL ? 'SET' : 'NOT_SET',
+        event: body.event,
+        sessionId: body.session_id
+      });
+
       if (supabase) {
         try {
           // Upsert shop by domain
