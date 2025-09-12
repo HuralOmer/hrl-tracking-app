@@ -872,15 +872,14 @@ async function bootstrap(): Promise<void> {
   });
 
   // WebSocket endpoint for real-time updates
-  fastify.register(async function (fastify) {
-    fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
-      const q = (req.query as any) as Record<string, string>;
-      const shop = q.shop as string || 'ecomxtrade.myshopify.com';
-      
-      console.log('WebSocket connection established for shop:', shop);
-      
-      // Send initial data
-      const sendUpdate = async () => {
+  fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
+    const q = (req.query as any) as Record<string, string>;
+    const shop = q.shop as string || 'ecomxtrade.myshopify.com';
+    
+    console.log('WebSocket connection established for shop:', shop);
+    
+    // Send initial data
+    const sendUpdate = async () => {
       const now = Math.floor(Date.now() / 1000);
       let activeUsers = 0;
       let totalSessions = 0;
@@ -968,7 +967,6 @@ async function bootstrap(): Promise<void> {
       console.error('WebSocket error:', err);
       clearInterval(interval);
     });
-  });
   });
 
   // Collect endpoint
