@@ -1328,7 +1328,7 @@ async function bootstrap(): Promise<void> {
           fastify.log.error({ err }, 'Supabase app-proxy collect error');
           return reply.code(500).send({ ok: false, error: 'supabase_error' });
         }
-      } else if (hasDb && pool) {
+      } else if (hasDb && pool && !supabase) {
         // shops upsert
         const shopRes = await pool.query(
           'insert into shops(domain) values ($1) on conflict(domain) do update set domain=excluded.domain returning id',
