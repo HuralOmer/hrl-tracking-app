@@ -1361,7 +1361,16 @@ async function bootstrap(): Promise<void> {
         return reply.send({ ok: true, note: 'no_db_dev' });
       }
 
-      return reply.send({ ok: true });
+      return reply.send({ 
+        ok: true, 
+        debug: {
+          hasSupabase: !!supabase,
+          hasDb: hasDb,
+          hasPool: !!pool,
+          supabaseUrl: process.env.SUPABASE_URL ? 'SET' : 'NOT_SET',
+          databaseUrl: process.env.DATABASE_URL ? 'SET' : 'NOT_SET'
+        }
+      });
     } catch (err) {
       (req as any).log?.error?.({ err }, 'app-proxy/collect failed');
       return reply.code(400).send({ ok: false, error: 'bad_request' });
