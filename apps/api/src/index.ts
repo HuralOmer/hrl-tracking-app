@@ -691,7 +691,7 @@ async function bootstrap(): Promise<void> {
         
         const shopId = shopData.id;
 
-        // Upsert user (session)
+        // Insert user session (her oturum ayrı kayıt)
         const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
         const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
         const ua = (req.headers['user-agent'] as string) || null;
@@ -699,7 +699,7 @@ async function bootstrap(): Promise<void> {
         
         const { error: userError } = await supabase
           .from('users')
-          .upsert({
+          .insert({
             id: crypto.randomUUID(),
             shop_id: shopId,
             session_id: body.session_id,
@@ -707,10 +707,10 @@ async function bootstrap(): Promise<void> {
             user_agent: ua,
             first_seen: new Date().toISOString(),
             last_seen: new Date().toISOString()
-          }, { onConflict: 'session_id' });
+          });
         
         if (userError) {
-          fastify.log.error({ err: userError }, 'Supabase user upsert error');
+          fastify.log.error({ err: userError }, 'Supabase user insert error');
         }
 
         // Insert event
@@ -858,7 +858,7 @@ async function bootstrap(): Promise<void> {
           
           const shopId = shopData.id;
 
-          // Upsert user (session)
+          // Insert user session (her oturum ayrı kayıt)
           const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
           const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
           const ua = (req.headers['user-agent'] as string) || null;
@@ -866,7 +866,7 @@ async function bootstrap(): Promise<void> {
           
           const { error: userError } = await supabase
             .from('users')
-            .upsert({
+            .insert({
               id: crypto.randomUUID(),
               shop_id: shopId,
               session_id: body.session_id,
@@ -874,10 +874,10 @@ async function bootstrap(): Promise<void> {
               user_agent: ua,
               first_seen: new Date().toISOString(),
               last_seen: new Date().toISOString()
-            }, { onConflict: 'session_id' });
+            });
           
           if (userError) {
-            fastify.log.error({ err: userError }, 'Supabase user upsert error (app-proxy)');
+            fastify.log.error({ err: userError }, 'Supabase user insert error (app-proxy)');
           }
 
           // Insert event
