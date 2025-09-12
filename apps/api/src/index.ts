@@ -1225,6 +1225,10 @@ async function bootstrap(): Promise<void> {
         sessionId: body.session_id
       });
 
+      // Force log to stdout for Railway
+      process.stdout.write(`\n🔍 DATABASE DEBUG: hasSupabase=${!!supabase}, hasDb=${hasDb}, hasPool=${!!pool}\n`);
+      process.stdout.write(`🔍 ENV VARS: SUPABASE_URL=${process.env.SUPABASE_URL ? 'SET' : 'NOT_SET'}, DATABASE_URL=${process.env.DATABASE_URL ? 'SET' : 'NOT_SET'}\n`);
+
       if (supabase) {
         try {
           // Upsert shop by domain
