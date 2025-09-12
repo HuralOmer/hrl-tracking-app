@@ -13,6 +13,7 @@
   "dependencies": {
     "@fastify/cors": "^8.4.2",
     "@fastify/websocket": "^8.3.1",
+    "@supabase/supabase-js": "^2.57.4",
     "@upstash/redis": "^1.35.3",
     "drizzle-orm": "^0.31.2",
     "fastify": "^4.26.2",

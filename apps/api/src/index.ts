@@ -7,6 +7,7 @@ import { Pool } from 'pg';
 import Redis from 'ioredis';
 import { Redis as UpstashRedis } from '@upstash/redis';
 import crypto from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
 
 async function bootstrap(): Promise<void> {
   const fastify = Fastify({ logger: true });
@@ -30,6 +31,37 @@ async function bootstrap(): Promise<void> {
   const hasDb = !!process.env.DATABASE_URL;
   const pool = hasDb ? new Pool({ connectionString: process.env.DATABASE_URL }) : null as unknown as Pool;
   const db = hasDb ? drizzle(pool) : (null as any);
+  
+  // Supabase client
+  const supabaseUrl = process.env.SUPABASE_URL || '';
+  const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+  const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+  
+  // Real-time subscriptions for live updates
+  if (supabase) {
+    // Subscribe to events table changes
+    supabase
+      .channel('events_changes')
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'events' },
+        (payload) => {
+          fastify.log.info({ payload }, 'New event received via real-time');
+          // Broadcast to WebSocket clients if needed
+        }
+      )
+      .subscribe();
+    
+    // Subscribe to sessions table changes
+    supabase
+      .channel('sessions_changes')
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'sessions' },
+        (payload) => {
+          fastify.log.info({ payload }, 'Session updated via real-time');
+        }
+      )
+      .subscribe();
+  }
   
   const redisUrl = process.env.REDIS_URL || '';
   const useRest = !!process.env.UPSTASH_REDIS_REST_URL && !!process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -81,7 +113,48 @@ async function bootstrap(): Promise<void> {
     }
 
     // Get database stats if available
-    if (hasDb && pool) {
+    if (supabase) {
+      try {
+        // Get total sessions from last 24 hours
+        const { data: sessionData, error: sessionError } = await supabase
+          .from('sessions')
+          .select('id')
+          .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+        
+        if (!sessionError) {
+          totalSessions = sessionData?.length || 0;
+        }
+
+        // Get page views from last 24 hours
+        const { data: eventData, error: eventError } = await supabase
+          .from('events')
+          .select('id')
+          .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .eq('name', 'page_view');
+        
+        if (!eventError) {
+          pageViews = eventData?.length || 0;
+        }
+
+        // Get conversions from last 24 hours
+        const { data: conversionData, error: conversionError } = await supabase
+          .from('events')
+          .select('id')
+          .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .in('name', ['add_to_cart', 'checkout_started', 'purchase']);
+        
+        if (!conversionError) {
+          const conversions = conversionData?.length || 0;
+          conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
+        }
+      } catch (err) {
+        fastify.log.error({ err }, 'Supabase error in dashboard API');
+        // Fallback to demo data
+        totalSessions = Math.floor(Math.random() * 500) + 100;
+        pageViews = Math.floor(Math.random() * 2000) + 500;
+        conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
+      }
+    } else if (hasDb && pool) {
       try {
         const sessionRes = await pool.query('SELECT COUNT(*) as count FROM sessions WHERE last_seen > NOW() - INTERVAL \'24 hours\'');
         totalSessions = parseInt(sessionRes.rows[0].count) || 0;
@@ -166,7 +239,48 @@ async function bootstrap(): Promise<void> {
     }
 
     // Get database stats if available
-    if (hasDb && pool) {
+    if (supabase) {
+      try {
+        // Get total sessions from last 24 hours
+        const { data: sessionData, error: sessionError } = await supabase
+          .from('sessions')
+          .select('id')
+          .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+        
+        if (!sessionError) {
+          totalSessions = sessionData?.length || 0;
+        }
+
+        // Get page views from last 24 hours
+        const { data: eventData, error: eventError } = await supabase
+          .from('events')
+          .select('id')
+          .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .eq('name', 'page_view');
+        
+        if (!eventError) {
+          pageViews = eventData?.length || 0;
+        }
+
+        // Get conversions from last 24 hours
+        const { data: conversionData, error: conversionError } = await supabase
+          .from('events')
+          .select('id')
+          .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .in('name', ['add_to_cart', 'checkout_started', 'purchase']);
+        
+        if (!conversionError) {
+          const conversions = conversionData?.length || 0;
+          conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
+        }
+      } catch (err) {
+        fastify.log.error({ err }, 'Supabase error in dashboard stats');
+        // Fallback to demo data
+        totalSessions = Math.floor(Math.random() * 500) + 100;
+        pageViews = Math.floor(Math.random() * 2000) + 500;
+        conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
+      }
+    } else if (hasDb && pool) {
       try {
         const sessionRes = await pool.query('SELECT COUNT(*) as count FROM sessions WHERE last_seen > NOW() - INTERVAL \'24 hours\'');
         totalSessions = parseInt(sessionRes.rows[0].count) || 0;
@@ -269,7 +383,7 @@ async function bootstrap(): Promise<void> {
             <p><strong>Status:</strong> <span class="status-badge">Active</span></p>
             <p><strong>Version:</strong> 1.0.0</p>
             <p><strong>Last Updated:</strong> ${new Date().toLocaleString()}</p>
-            <p><strong>Database:</strong> ${hasDb ? 'Connected' : 'Demo Mode'}</p>
+            <p><strong>Database:</strong> ${supabase ? 'Supabase Connected' : hasDb ? 'PostgreSQL Connected' : 'Demo Mode'}</p>
             <p><strong>Redis:</strong> ${redis ? 'Connected' : 'Demo Mode'}</p>
           </div>
         </div>
@@ -467,7 +581,44 @@ async function bootstrap(): Promise<void> {
       }
 
       // Get database stats if available
-      if (hasDb && pool) {
+      if (supabase) {
+        try {
+          // Get total sessions from last 24 hours
+          const { data: sessionData, error: sessionError } = await supabase
+            .from('sessions')
+            .select('id')
+            .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          
+          if (!sessionError) {
+            totalSessions = sessionData?.length || 0;
+          }
+
+          // Get page views from last 24 hours
+          const { data: eventData, error: eventError } = await supabase
+            .from('events')
+            .select('id')
+            .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .eq('name', 'page_view');
+          
+          if (!eventError) {
+            pageViews = eventData?.length || 0;
+          }
+
+          // Get conversions from last 24 hours
+          const { data: conversionData, error: conversionError } = await supabase
+            .from('events')
+            .select('id')
+            .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .in('name', ['add_to_cart', 'checkout_started', 'purchase']);
+          
+          if (!conversionError) {
+            const conversions = conversionData?.length || 0;
+            conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
+          }
+        } catch (err) {
+          fastify.log.error({ err }, 'Supabase error in WebSocket');
+        }
+      } else if (hasDb && pool) {
         try {
           const sessionRes = await pool.query('SELECT COUNT(*) as count FROM sessions WHERE last_seen > NOW() - INTERVAL \'24 hours\'');
           totalSessions = parseInt(sessionRes.rows[0].count) || 0;
@@ -527,33 +678,92 @@ async function bootstrap(): Promise<void> {
       event_id: z.string().optional(),
     }).parse(req.body);
 
-    if (!hasDb) {
+    if (supabase) {
+      try {
+        // Upsert shop by domain
+        const { data: shopData, error: shopError } = await supabase
+          .from('shops')
+          .upsert({ domain: body.shop_domain }, { onConflict: 'domain' })
+          .select('id')
+          .single();
+        
+        if (shopError) {
+          fastify.log.error({ err: shopError }, 'Supabase shop upsert error');
+          return reply.code(500).send({ ok: false, error: 'shop_upsert_failed' });
+        }
+        
+        const shopId = shopData.id;
+
+        // Upsert session
+        const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
+        const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
+        const ua = (req.headers['user-agent'] as string) || null;
+        const ref = body.page?.ref || null;
+        
+        const { error: sessionError } = await supabase
+          .from('sessions')
+          .upsert({
+            id: body.session_id,
+            shop_id: shopId,
+            first_seen: new Date().toISOString(),
+            last_seen: new Date().toISOString(),
+            ip: ip,
+            ua: ua,
+            referrer: ref
+          }, { onConflict: 'id' });
+        
+        if (sessionError) {
+          fastify.log.error({ err: sessionError }, 'Supabase session upsert error');
+        }
+
+        // Insert event
+        const tsMs = body.ts ?? Date.now();
+        const { error: eventError } = await supabase
+          .from('events')
+          .insert({
+            shop_id: shopId,
+            session_id: body.session_id,
+            name: body.event,
+            ts: new Date(tsMs).toISOString(),
+            page_path: body.page?.path || null,
+            payload: body.payload ?? null,
+            event_id: body.event_id || null
+          });
+        
+        if (eventError) {
+          fastify.log.error({ err: eventError }, 'Supabase event insert error');
+        }
+      } catch (err) {
+        fastify.log.error({ err }, 'Supabase collect error');
+        return reply.code(500).send({ ok: false, error: 'supabase_error' });
+      }
+    } else if (hasDb && pool) {
+      // Upsert shop by domain
+      const shopRes = await pool.query(
+        'insert into shops(domain) values ($1) on conflict(domain) do update set domain=excluded.domain returning id',
+        [body.shop_domain]
+      );
+      const shopId: string = shopRes.rows[0].id;
+
+      // Upsert session
+      const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
+      const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
+      const ua = (req.headers['user-agent'] as string) || null;
+      const ref = body.page?.ref || null;
+      await pool.query(
+        'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
+        [body.session_id, shopId, ip, ua, ref]
+      );
+
+      // Insert event
+      const tsMs = body.ts ?? Date.now();
+      await pool.query(
+        'insert into events(shop_id, session_id, name, ts, page_path, payload, event_id) values ($1,$2,$3, to_timestamp($4/1000.0), $5, $6, $7) on conflict(event_id) do nothing',
+        [shopId, body.session_id, body.event, tsMs, body.page?.path || null, body.payload ?? null, body.event_id || null]
+      );
+    } else {
       return reply.send({ ok: true, note: 'no_db_dev' });
     }
-
-    // Upsert shop by domain
-    const shopRes = await pool.query(
-      'insert into shops(domain) values ($1) on conflict(domain) do update set domain=excluded.domain returning id',
-      [body.shop_domain]
-    );
-    const shopId: string = shopRes.rows[0].id;
-
-    // Upsert session
-    const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
-    const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
-    const ua = (req.headers['user-agent'] as string) || null;
-    const ref = body.page?.ref || null;
-    await pool.query(
-      'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
-      [body.session_id, shopId, ip, ua, ref]
-    );
-
-    // Insert event
-    const tsMs = body.ts ?? Date.now();
-    await pool.query(
-      'insert into events(shop_id, session_id, name, ts, page_path, payload, event_id) values ($1,$2,$3, to_timestamp($4/1000.0), $5, $6, $7) on conflict(event_id) do nothing',
-      [shopId, body.session_id, body.event, tsMs, body.page?.path || null, body.payload ?? null, body.event_id || null]
-    );
 
     reply.send({ ok: true });
   });
@@ -619,33 +829,92 @@ async function bootstrap(): Promise<void> {
         event_id: z.string().max(100).optional(),
       }).parse(req.body);
 
-      if (!hasDb) {
+      if (supabase) {
+        try {
+          // Upsert shop by domain
+          const { data: shopData, error: shopError } = await supabase
+            .from('shops')
+            .upsert({ domain: body.shop_domain }, { onConflict: 'domain' })
+            .select('id')
+            .single();
+          
+          if (shopError) {
+            fastify.log.error({ err: shopError }, 'Supabase shop upsert error (app-proxy)');
+            return reply.code(500).send({ ok: false, error: 'shop_upsert_failed' });
+          }
+          
+          const shopId = shopData.id;
+
+          // Upsert session
+          const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
+          const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
+          const ua = (req.headers['user-agent'] as string) || null;
+          const ref = body.page?.ref || null;
+          
+          const { error: sessionError } = await supabase
+            .from('sessions')
+            .upsert({
+              id: body.session_id,
+              shop_id: shopId,
+              first_seen: new Date().toISOString(),
+              last_seen: new Date().toISOString(),
+              ip: ip,
+              ua: ua,
+              referrer: ref
+            }, { onConflict: 'id' });
+          
+          if (sessionError) {
+            fastify.log.error({ err: sessionError }, 'Supabase session upsert error (app-proxy)');
+          }
+
+          // Insert event
+          const tsMs = body.ts ?? Date.now();
+          const { error: eventError } = await supabase
+            .from('events')
+            .insert({
+              shop_id: shopId,
+              session_id: body.session_id,
+              name: body.event,
+              ts: new Date(tsMs).toISOString(),
+              page_path: body.page?.path || null,
+              payload: body.payload ?? null,
+              event_id: body.event_id || null
+            });
+          
+          if (eventError) {
+            fastify.log.error({ err: eventError }, 'Supabase event insert error (app-proxy)');
+          }
+        } catch (err) {
+          fastify.log.error({ err }, 'Supabase app-proxy collect error');
+          return reply.code(500).send({ ok: false, error: 'supabase_error' });
+        }
+      } else if (hasDb && pool) {
+        // shops upsert
+        const shopRes = await pool.query(
+          'insert into shops(domain) values ($1) on conflict(domain) do update set domain=excluded.domain returning id',
+          [body.shop_domain]
+        );
+        const shopId: string = shopRes.rows[0].id;
+
+        // sessions upsert
+        const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
+        const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
+        const ua = (req.headers['user-agent'] as string) || null;
+        const ref = body.page?.ref || null;
+        await pool.query(
+          'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
+          [body.session_id, shopId, ip, ua, ref]
+        );
+
+        // events insert
+        const tsMs = body.ts ?? Date.now();
+        await pool.query(
+          'insert into events(shop_id, session_id, name, ts, page_path, payload, event_id) values ($1,$2,$3, to_timestamp($4/1000.0), $5, $6, $7) on conflict(event_id) do nothing',
+          [shopId, body.session_id, body.event, tsMs, body.page?.path || null, body.payload ?? null, body.event_id || null]
+        );
+      } else {
         return reply.send({ ok: true, note: 'no_db_dev' });
       }
-
-      // shops upsert
-      const shopRes = await pool.query(
-        'insert into shops(domain) values ($1) on conflict(domain) do update set domain=excluded.domain returning id',
-        [body.shop_domain]
-      );
-      const shopId: string = shopRes.rows[0].id;
-
-      // sessions upsert
-      const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
-      const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
-      const ua = (req.headers['user-agent'] as string) || null;
-      const ref = body.page?.ref || null;
-      await pool.query(
-        'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
-        [body.session_id, shopId, ip, ua, ref]
-      );
-
-      // events insert
-      const tsMs = body.ts ?? Date.now();
-      await pool.query(
-        'insert into events(shop_id, session_id, name, ts, page_path, payload, event_id) values ($1,$2,$3, to_timestamp($4/1000.0), $5, $6, $7) on conflict(event_id) do nothing',
-        [shopId, body.session_id, body.event, tsMs, body.page?.path || null, body.payload ?? null, body.event_id || null]
-      );
 
       return reply.send({ ok: true });
     } catch (err) {
