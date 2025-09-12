@@ -126,7 +126,7 @@ async function bootstrap(): Promise<void> {
     localStorage.setItem('ecomxtrade_visit_no', visitNo.toString());
     
     // Benzersiz session ID oluştur: baseSessionId + visitNo
-    const sessionId = `${baseSessionId}-v${visitNo}`;
+    const sessionId = baseSessionId + '-v' + visitNo;
     
     console.log('🆕🆕🆕 NEW VISIT SESSION v2.1:', sessionId);
     console.log('🆕🆕🆕 VISIT NUMBER:', visitNo);
