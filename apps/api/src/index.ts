@@ -119,7 +119,7 @@ async function bootstrap(): Promise<void> {
         const { data: sessionData, error: sessionError } = await supabase
           .from('users')
           .select('id')
-          .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
         if (!sessionError) {
           totalSessions = sessionData?.length || 0;
@@ -244,7 +244,7 @@ async function bootstrap(): Promise<void> {
         const { data: sessionData, error: sessionError } = await supabase
           .from('users')
           .select('id')
-          .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
         if (!sessionError) {
           totalSessions = sessionData?.length || 0;
@@ -585,7 +585,7 @@ async function bootstrap(): Promise<void> {
           const { data: sessionData, error: sessionError } = await supabase
             .from('users')
             .select('id')
-            .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+            .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
           
           if (!sessionError) {
             totalSessions = sessionData?.length || 0;
