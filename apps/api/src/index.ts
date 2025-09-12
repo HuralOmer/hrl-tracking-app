@@ -115,16 +115,14 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours (using events table - unique sessions)
+        // Get total sessions from last 24 hours (using sessions table)
         const { data: sessionData, error: sessionError } = await supabase
-          .from('events')
-          .select('session_id')
-          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .from('sessions')
+          .select('id')
+          .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
         if (!sessionError) {
-          // Benzersiz session'ları say
-          const uniqueSessions = new Set(sessionData?.map(pv => pv.session_id) || []);
-          totalSessions = uniqueSessions.size;
+          totalSessions = sessionData?.length || 0;
         }
 
         // Get page views from last 24 hours (using page_views table)
@@ -242,16 +240,14 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours (using events table - unique sessions)
+        // Get total sessions from last 24 hours (using sessions table)
         const { data: sessionData, error: sessionError } = await supabase
-          .from('events')
-          .select('session_id')
-          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .from('sessions')
+          .select('id')
+          .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
         if (!sessionError) {
-          // Benzersiz session'ları say
-          const uniqueSessions = new Set(sessionData?.map(pv => pv.session_id) || []);
-          totalSessions = uniqueSessions.size;
+          totalSessions = sessionData?.length || 0;
         }
 
         // Get page views from last 24 hours (using page_views table)
@@ -585,9 +581,9 @@ async function bootstrap(): Promise<void> {
       // Get database stats if available
       if (supabase) {
         try {
-          // Get total sessions from last 24 hours (using users table)
+          // Get total sessions from last 24 hours (using sessions table)
           const { data: sessionData, error: sessionError } = await supabase
-            .from('users')
+            .from('sessions')
             .select('id')
             .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
           
@@ -706,20 +702,20 @@ async function bootstrap(): Promise<void> {
         
         // Bu session bu shop'ta var mı?
         const { data: existingSession, error: checkErr } = await supabase
-          .from('users')
+          .from('sessions')
           .select('id')
           .eq('shop_id', shopId)
           .eq('session_id', sessionId)
           .maybeSingle();
 
         if (checkErr) {
-          fastify.log.error({ err: checkErr }, 'Supabase users check error');
+          fastify.log.error({ err: checkErr }, 'Supabase sessions check error');
         }
 
         // Yoksa yarat, varsa last_seen güncelle
         if (!existingSession) {
-          const { error: userInsertErr } = await supabase
-            .from('users')
+          const { error: sessionInsertErr } = await supabase
+            .from('sessions')
             .insert({
               id: crypto.randomUUID(),
               shop_id: shopId,
@@ -729,14 +725,14 @@ async function bootstrap(): Promise<void> {
               first_seen: new Date().toISOString(),
               last_seen: new Date().toISOString()
             });
-          if (userInsertErr) fastify.log.error({ err: userInsertErr }, 'Supabase user insert error');
+          if (sessionInsertErr) fastify.log.error({ err: sessionInsertErr }, 'Supabase session insert error');
         } else {
-          const { error: userUpdateErr } = await supabase
-            .from('users')
+          const { error: sessionUpdateErr } = await supabase
+            .from('sessions')
             .update({ last_seen: new Date().toISOString(), ip_address: ip ?? null, user_agent: ua ?? null })
             .eq('shop_id', shopId)
             .eq('session_id', sessionId);
-          if (userUpdateErr) fastify.log.error({ err: userUpdateErr }, 'Supabase user update error');
+          if (sessionUpdateErr) fastify.log.error({ err: sessionUpdateErr }, 'Supabase session update error');
         }
 
         // Insert event
