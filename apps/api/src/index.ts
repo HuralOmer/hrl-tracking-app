@@ -700,40 +700,19 @@ async function bootstrap(): Promise<void> {
         // Client'tan gelen sabit session_id'yi kullan
         const sessionId = body.session_id;
         
-        // Bu session bu shop'ta var mı?
-        const { data: existingSession, error: checkErr } = await supabase
+        // Her girişte yeni session oluştur
+        const { error: sessionInsertErr } = await supabase
           .from('sessions')
-          .select('id')
-          .eq('shop_id', shopId)
-          .eq('session_id', sessionId)
-          .maybeSingle();
-
-        if (checkErr) {
-          fastify.log.error({ err: checkErr }, 'Supabase sessions check error');
-        }
-
-        // Yoksa yarat, varsa last_seen güncelle
-        if (!existingSession) {
-          const { error: sessionInsertErr } = await supabase
-            .from('sessions')
-            .insert({
-              id: crypto.randomUUID(),
-              shop_id: shopId,
-              session_id: sessionId,
-              ip_address: ip,
-              user_agent: ua,
-              first_seen: new Date().toISOString(),
-              last_seen: new Date().toISOString()
-            });
-          if (sessionInsertErr) fastify.log.error({ err: sessionInsertErr }, 'Supabase session insert error');
-        } else {
-          const { error: sessionUpdateErr } = await supabase
-            .from('sessions')
-            .update({ last_seen: new Date().toISOString(), ip_address: ip ?? null, user_agent: ua ?? null })
-            .eq('shop_id', shopId)
-            .eq('session_id', sessionId);
-          if (sessionUpdateErr) fastify.log.error({ err: sessionUpdateErr }, 'Supabase session update error');
-        }
+          .insert({
+            id: crypto.randomUUID(),
+            shop_id: shopId,
+            session_id: sessionId,
+            ip_address: ip,
+            user_agent: ua,
+            first_seen: new Date().toISOString(),
+            last_seen: new Date().toISOString()
+          });
+        if (sessionInsertErr) fastify.log.error({ err: sessionInsertErr }, 'Supabase session insert error');
 
         // Insert event
         const tsMs = body.ts ?? Date.now();
@@ -896,51 +875,24 @@ async function bootstrap(): Promise<void> {
             timestamp: new Date().toISOString()
           });
           
-          // Sadece page_view event'inde yeni session oluştur
+          // Her page_view event'inde yeni session oluştur
           if (body.event === 'page_view') {
-            // Bu session daha önce var mı kontrol et (sessions tablosunda)
-            const { data: existingSession } = await supabase
+            console.log('✅ CREATING NEW SESSION:', sessionId);
+            
+            const { error: sessionError } = await supabase
               .from('sessions')
-              .select('id')
-              .eq('session_id', sessionId)
-              .eq('shop_id', shopId)
-              .maybeSingle();
+              .insert({
+                id: crypto.randomUUID(),
+                shop_id: shopId,
+                session_id: sessionId,
+                ip_address: ip,
+                user_agent: ua,
+                first_seen: new Date().toISOString(),
+                last_seen: new Date().toISOString()
+              });
             
-            console.log('🔍 SESSION CHECK:', {
-              sessionId: sessionId,
-              existingSession: !!existingSession,
-              isNewSession: !existingSession
-            });
-            
-            // Sadece yeni session ise session kaydı oluştur
-            if (!existingSession) {
-              console.log('✅ CREATING NEW SESSION:', sessionId);
-              const { error: sessionError } = await supabase
-                .from('sessions')
-                .insert({
-                  id: crypto.randomUUID(),
-                  shop_id: shopId,
-                  session_id: sessionId,
-                  ip_address: ip,
-                  user_agent: ua,
-                  first_seen: new Date().toISOString(),
-                  last_seen: new Date().toISOString()
-                });
-              
-              if (sessionError) {
-                fastify.log.error({ err: sessionError }, 'Supabase session insert error (app-proxy)');
-              }
-            } else {
-              // Mevcut session'ın last_seen'ini güncelle
-              const { error: updateError } = await supabase
-                .from('sessions')
-                .update({ last_seen: new Date().toISOString() })
-                .eq('session_id', sessionId)
-                .eq('shop_id', shopId);
-              
-              if (updateError) {
-                fastify.log.error({ err: updateError }, 'Supabase session update error (app-proxy)');
-              }
+            if (sessionError) {
+              fastify.log.error({ err: sessionError }, 'Supabase session insert error (app-proxy)');
             }
           }
 

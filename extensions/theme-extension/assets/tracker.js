@@ -31,13 +31,11 @@
     return uuidRegex.test(uuid);
   }
   
-  // Get or create session ID
+  // Get or create session ID - Her girişte yeni session
   function getSessionId() {
-    let sessionId = localStorage.getItem('ecomxtrade_session_id');
-    if (!sessionId || !isValidUUID(sessionId)) {
-      sessionId = generateSessionId();
-      localStorage.setItem('ecomxtrade_session_id', sessionId);
-    }
+    // Her sayfa yüklendiğinde yeni session oluştur
+    const sessionId = generateSessionId();
+    localStorage.setItem('ecomxtrade_session_id', sessionId);
     return sessionId;
   }
 
