@@ -36,6 +36,7 @@
     // Her sayfa yüklendiğinde yeni session oluştur
     const sessionId = generateSessionId();
     localStorage.setItem('ecomxtrade_session_id', sessionId);
+    console.log('🆕 NEW SESSION ID GENERATED:', sessionId);
     return sessionId;
   }
 
@@ -174,6 +175,12 @@
       event_id: 'event_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
     };
     
+    console.log('📤 SENDING EVENT:', {
+      event: eventName,
+      sessionId: sessionId,
+      timestamp: new Date().toISOString()
+    });
+    
     // Critical event'ler için sendBeacon kullan (tarayıcı kapanırken çalışır)
     const criticalEvents = ['page_view', 'beforeunload', 'unload'];
     
@@ -207,6 +214,7 @@
   
   // Track page view
   function trackPageView() {
+    console.log('📄 TRACKING PAGE VIEW');
     trackEvent('page_view');
   }
   
