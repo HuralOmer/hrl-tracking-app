@@ -701,26 +701,42 @@ async function bootstrap(): Promise<void> {
         const ua = (req.headers['user-agent'] as string) || null;
         const ref = body.page?.ref || null;
         
-        // Her girişte yeni session_id oluştur
-        const newSessionId = crypto.randomUUID();
-        const userId = `user_${crypto.randomUUID()}`; // Her giriş için yeni user_id
+        // Client'tan gelen sabit session_id'yi kullan
+        const sessionId = body.session_id;
         
-        // Insert user session (her oturum ayrı kayıt)
-        const { error: userError } = await supabase
+        // Bu session bu shop'ta var mı?
+        const { data: existingSession, error: checkErr } = await supabase
           .from('users')
-          .insert({
-            id: crypto.randomUUID(),
-            shop_id: shopId,
-            user_id: userId,
-            session_id: newSessionId,
-            ip_address: ip,
-            user_agent: ua,
-            first_seen: new Date().toISOString(),
-            last_seen: new Date().toISOString()
-          });
-        
-        if (userError) {
-          fastify.log.error({ err: userError }, 'Supabase user insert error');
+          .select('id')
+          .eq('shop_id', shopId)
+          .eq('session_id', sessionId)
+          .maybeSingle();
+
+        if (checkErr) {
+          fastify.log.error({ err: checkErr }, 'Supabase users check error');
+        }
+
+        // Yoksa yarat, varsa last_seen güncelle
+        if (!existingSession) {
+          const { error: userInsertErr } = await supabase
+            .from('users')
+            .insert({
+              id: crypto.randomUUID(),
+              shop_id: shopId,
+              session_id: sessionId,
+              ip_address: ip,
+              user_agent: ua,
+              first_seen: new Date().toISOString(),
+              last_seen: new Date().toISOString()
+            });
+          if (userInsertErr) fastify.log.error({ err: userInsertErr }, 'Supabase user insert error');
+        } else {
+          const { error: userUpdateErr } = await supabase
+            .from('users')
+            .update({ last_seen: new Date().toISOString(), ip_address: ip ?? null, user_agent: ua ?? null })
+            .eq('shop_id', shopId)
+            .eq('session_id', sessionId);
+          if (userUpdateErr) fastify.log.error({ err: userUpdateErr }, 'Supabase user update error');
         }
 
         // Insert event
@@ -729,8 +745,7 @@ async function bootstrap(): Promise<void> {
           .from('events')
           .insert({
             shop_id: shopId,
-            user_id: userId,
-            session_id: newSessionId,
+            session_id: sessionId,
             event_name: body.event,
             created_at: new Date(tsMs).toISOString(),
             event_data: body.payload ?? null
@@ -746,7 +761,7 @@ async function bootstrap(): Promise<void> {
             .from('page_views')
             .insert({
               shop_id: shopId,
-              session_id: newSessionId,
+              session_id: sessionId,
               url: body.page?.path || '/',
               title: body.page?.title || '',
               referrer: body.page?.ref || null,
