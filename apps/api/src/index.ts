@@ -691,17 +691,28 @@ async function bootstrap(): Promise<void> {
         
         const shopId = shopData.id;
 
-        // Insert user session (her oturum ayrı kayıt)
+        // Generate user_id based on browser fingerprint (same user = same user_id)
         const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
         const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
         const ua = (req.headers['user-agent'] as string) || null;
         const ref = body.page?.ref || null;
         
+        // Create user fingerprint for consistent user_id
+        const userFingerprint = crypto
+          .createHash('sha256')
+          .update(`${ip || 'unknown'}-${ua || 'unknown'}-${body.shop_domain}`)
+          .digest('hex')
+          .substring(0, 16);
+        
+        const userId = `user_${userFingerprint}`;
+        
+        // Insert user session (her oturum ayrı kayıt, ama aynı user_id)
         const { error: userError } = await supabase
           .from('users')
           .insert({
             id: crypto.randomUUID(),
             shop_id: shopId,
+            user_id: userId,
             session_id: body.session_id,
             ip_address: ip,
             user_agent: ua,
@@ -719,6 +730,7 @@ async function bootstrap(): Promise<void> {
           .from('events')
           .insert({
             shop_id: shopId,
+            user_id: userId,
             session_id: body.session_id,
             event_name: body.event,
             created_at: new Date(tsMs).toISOString(),
@@ -735,6 +747,7 @@ async function bootstrap(): Promise<void> {
             .from('page_views')
             .insert({
               shop_id: shopId,
+              user_id: userId,
               session_id: body.session_id,
               url: body.page?.path || '/',
               title: body.page?.title || '',
@@ -858,17 +871,28 @@ async function bootstrap(): Promise<void> {
           
           const shopId = shopData.id;
 
-          // Insert user session (her oturum ayrı kayıt)
+          // Generate user_id based on browser fingerprint (same user = same user_id)
           const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
           const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
           const ua = (req.headers['user-agent'] as string) || null;
           const ref = body.page?.ref || null;
           
+          // Create user fingerprint for consistent user_id
+          const userFingerprint = crypto
+            .createHash('sha256')
+            .update(`${ip || 'unknown'}-${ua || 'unknown'}-${body.shop_domain}`)
+            .digest('hex')
+            .substring(0, 16);
+          
+          const userId = `user_${userFingerprint}`;
+          
+          // Insert user session (her oturum ayrı kayıt, ama aynı user_id)
           const { error: userError } = await supabase
             .from('users')
             .insert({
               id: crypto.randomUUID(),
               shop_id: shopId,
+              user_id: userId,
               session_id: body.session_id,
               ip_address: ip,
               user_agent: ua,
@@ -886,6 +910,7 @@ async function bootstrap(): Promise<void> {
             .from('events')
             .insert({
               shop_id: shopId,
+              user_id: userId,
               session_id: body.session_id,
               event_name: body.event,
               created_at: new Date(tsMs).toISOString(),
@@ -902,6 +927,7 @@ async function bootstrap(): Promise<void> {
               .from('page_views')
               .insert({
                 shop_id: shopId,
+                user_id: userId,
                 session_id: body.session_id,
                 url: body.page?.path || '/',
                 title: body.page?.title || '',
