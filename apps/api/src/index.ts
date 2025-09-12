@@ -115,14 +115,16 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours (using users table)
+        // Get total sessions from last 24 hours (using page_views table - unique sessions)
         const { data: sessionData, error: sessionError } = await supabase
-          .from('users')
-          .select('id')
-          .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .from('page_views')
+          .select('session_id')
+          .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
         if (!sessionError) {
-          totalSessions = sessionData?.length || 0;
+          // Benzersiz session'ları say
+          const uniqueSessions = new Set(sessionData?.map(pv => pv.session_id) || []);
+          totalSessions = uniqueSessions.size;
         }
 
         // Get page views from last 24 hours (using page_views table)
@@ -240,14 +242,16 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours (using users table)
+        // Get total sessions from last 24 hours (using page_views table - unique sessions)
         const { data: sessionData, error: sessionError } = await supabase
-          .from('users')
-          .select('id')
-          .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .from('page_views')
+          .select('session_id')
+          .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
         if (!sessionError) {
-          totalSessions = sessionData?.length || 0;
+          // Benzersiz session'ları say
+          const uniqueSessions = new Set(sessionData?.map(pv => pv.session_id) || []);
+          totalSessions = uniqueSessions.size;
         }
 
         // Get page views from last 24 hours (using page_views table)
