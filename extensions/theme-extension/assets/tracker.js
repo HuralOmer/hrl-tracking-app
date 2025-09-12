@@ -1,10 +1,12 @@
-// EcomXtrade Tracking Script
+// EcomXtrade Tracking Script v2.0 - Cache Bypass
 (function() {
   'use strict';
   
   // Configuration
   const TRACKING_URL = 'https://hrl-tracking-app-production.up.railway.app';
   const SHOP_DOMAIN = window.location.hostname;
+  
+  console.log('🚀 ECOMXTRADE TRACKING SCRIPT v2.0 LOADED');
   
   // Leader tab management
   let isLeaderTab = false;
@@ -36,7 +38,8 @@
     // Her sayfa yüklendiğinde yeni session oluştur
     const sessionId = generateSessionId();
     localStorage.setItem('ecomxtrade_session_id', sessionId);
-    console.log('🆕 NEW SESSION ID GENERATED:', sessionId);
+    console.log('🆕🆕🆕 NEW SESSION ID GENERATED v2.0:', sessionId);
+    console.log('🆕🆕🆕 TIMESTAMP:', new Date().toISOString());
     return sessionId;
   }
 
@@ -214,7 +217,8 @@
   
   // Track page view
   function trackPageView() {
-    console.log('📄 TRACKING PAGE VIEW');
+    console.log('📄📄📄 TRACKING PAGE VIEW v2.0');
+    console.log('📄📄📄 URL:', window.location.href);
     trackEvent('page_view');
   }
   
