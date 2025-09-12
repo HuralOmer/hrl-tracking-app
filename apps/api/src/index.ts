@@ -898,9 +898,9 @@ async function bootstrap(): Promise<void> {
           
           // Sadece page_view event'inde yeni session oluştur
           if (body.event === 'page_view') {
-            // Bu session daha önce var mı kontrol et
+            // Bu session daha önce var mı kontrol et (sessions tablosunda)
             const { data: existingSession } = await supabase
-              .from('users')
+              .from('sessions')
               .select('id')
               .eq('session_id', sessionId)
               .eq('shop_id', shopId)
@@ -912,11 +912,11 @@ async function bootstrap(): Promise<void> {
               isNewSession: !existingSession
             });
             
-            // Sadece yeni session ise user kaydı oluştur
+            // Sadece yeni session ise session kaydı oluştur
             if (!existingSession) {
               console.log('✅ CREATING NEW SESSION:', sessionId);
-              const { error: userError } = await supabase
-                .from('users')
+              const { error: sessionError } = await supabase
+                .from('sessions')
                 .insert({
                   id: crypto.randomUUID(),
                   shop_id: shopId,
@@ -927,19 +927,19 @@ async function bootstrap(): Promise<void> {
                   last_seen: new Date().toISOString()
                 });
               
-              if (userError) {
-                fastify.log.error({ err: userError }, 'Supabase user insert error (app-proxy)');
+              if (sessionError) {
+                fastify.log.error({ err: sessionError }, 'Supabase session insert error (app-proxy)');
               }
             } else {
               // Mevcut session'ın last_seen'ini güncelle
               const { error: updateError } = await supabase
-                .from('users')
+                .from('sessions')
                 .update({ last_seen: new Date().toISOString() })
                 .eq('session_id', sessionId)
                 .eq('shop_id', shopId);
               
               if (updateError) {
-                fastify.log.error({ err: updateError }, 'Supabase user update error (app-proxy)');
+                fastify.log.error({ err: updateError }, 'Supabase session update error (app-proxy)');
               }
             }
           }
