@@ -32,6 +32,14 @@ async function bootstrap(): Promise<void> {
   const supabaseUrl = process.env.SUPABASE_URL || '';
   const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
   const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+  // Redis configuration
+  const redisUrl = process.env.REDIS_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const useRest = !!process.env.UPSTASH_REDIS_REST_URL;
+  const redis = redisUrl ? (useRest ? new UpstashRedis({ url: process.env.UPSTASH_REDIS_REST_URL!, token: process.env.UPSTASH_REDIS_REST_TOKEN! }) : new Redis(redisUrl)) : null;
+  
+  // Constants
+  const ACTIVE_WINDOW_SEC = 30; // 30 seconds
   
   // Real-time subscriptions for live updates
   if (supabase) {
@@ -59,24 +67,9 @@ async function bootstrap(): Promise<void> {
       .subscribe();
   }
   
-  const redisUrl = process.env.REDIS_URL || '';
-  const useRest = !!process.env.UPSTASH_REDIS_REST_URL && !!process.env.UPSTASH_REDIS_REST_TOKEN;
-  const redis = useRest
-    ? new UpstashRedis({
-        url: process.env.UPSTASH_REDIS_REST_URL as string,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN as string,
-      })
-    : redisUrl
-      ? redisUrl.startsWith('rediss://')
-        ? new (Redis as any)(redisUrl, { tls: {} })
-        : new (Redis as any)(redisUrl)
-      : null;
-      
   if ((redis as any)?.on) {
     (redis as any).on('error', (err: any) => fastify.log.error({ err }, 'redis error'));
   }
-
-  const ACTIVE_WINDOW_SEC = 30; // 30 saniye - sayfa kapandığında hızlı offline
 
   // Health check
   fastify.get('/health', async () => ({ ok: true }));
@@ -526,12 +519,6 @@ async function bootstrap(): Promise<void> {
       pageViews = Math.floor(Math.random() * 2000) + 500;
       conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
     }
-    } else {
-      // Demo data when no database
-      totalSessions = Math.floor(Math.random() * 500) + 100;
-      pageViews = Math.floor(Math.random() * 2000) + 500;
-      conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
-    }
 
     return reply.send({
       activeUsers,
@@ -633,24 +620,6 @@ async function bootstrap(): Promise<void> {
         pageViews = Math.floor(Math.random() * 2000) + 500;
         conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
       }
-    } else if (hasDb && pool) {
-      try {
-        const sessionRes = await pool.query('SELECT COUNT(*) as count FROM sessions WHERE last_seen > NOW() - INTERVAL \'24 hours\'');
-        totalSessions = parseInt(sessionRes.rows[0].count) || 0;
-        
-        const eventRes = await pool.query('SELECT COUNT(*) as count FROM events WHERE ts > NOW() - INTERVAL \'24 hours\' AND name = \'page_view\'');
-        pageViews = parseInt(eventRes.rows[0].count) || 0;
-        
-        const conversionRes = await pool.query('SELECT COUNT(*) as count FROM events WHERE ts > NOW() - INTERVAL \'24 hours\' AND name IN (\'add_to_cart\', \'checkout_started\', \'purchase\')');
-        const conversions = parseInt(conversionRes.rows[0].count) || 0;
-        conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
-      } catch (err) {
-        fastify.log.error({ err }, 'Database error in dashboard stats');
-        // Fallback to demo data
-        totalSessions = Math.floor(Math.random() * 500) + 100;
-        pageViews = Math.floor(Math.random() * 2000) + 500;
-        conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
-      }
     } else {
       // Demo data when no database
       totalSessions = Math.floor(Math.random() * 500) + 100;
@@ -736,7 +705,7 @@ async function bootstrap(): Promise<void> {
             <p><strong>Status:</strong> <span class="status-badge">Active</span></p>
             <p><strong>Version:</strong> 1.0.0</p>
             <p><strong>Last Updated:</strong> ${new Date().toLocaleString()}</p>
-            <p><strong>Database:</strong> ${supabase ? 'Supabase Connected' : hasDb ? 'PostgreSQL Connected' : 'Demo Mode'}</p>
+            <p><strong>Database:</strong> ${supabase ? 'Supabase Connected' : 'Demo Mode'}</p>
             <p><strong>Redis:</strong> ${redis ? 'Connected' : 'Demo Mode'}</p>
           </div>
         </div>
@@ -903,14 +872,15 @@ async function bootstrap(): Promise<void> {
   });
 
   // WebSocket endpoint for real-time updates
-  fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
-    const q = (req.query as any) as Record<string, string>;
-    const shop = q.shop as string || 'ecomxtrade.myshopify.com';
-    
-    console.log('WebSocket connection established for shop:', shop);
-    
-    // Send initial data
-    const sendUpdate = async () => {
+  fastify.register(async function (fastify) {
+    fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
+      const q = (req.query as any) as Record<string, string>;
+      const shop = q.shop as string || 'ecomxtrade.myshopify.com';
+      
+      console.log('WebSocket connection established for shop:', shop);
+      
+      // Send initial data
+      const sendUpdate = async () => {
       const now = Math.floor(Date.now() / 1000);
       let activeUsers = 0;
       let totalSessions = 0;
@@ -970,21 +940,6 @@ async function bootstrap(): Promise<void> {
         } catch (err) {
           fastify.log.error({ err }, 'Supabase error in WebSocket');
         }
-      } else if (hasDb && pool) {
-        try {
-          const sessionRes = await pool.query('SELECT COUNT(*) as count FROM sessions WHERE last_seen > NOW() - INTERVAL \'24 hours\'');
-          totalSessions = parseInt(sessionRes.rows[0].count) || 0;
-          
-          const eventRes = await pool.query('SELECT COUNT(*) as count FROM events WHERE ts > NOW() - INTERVAL \'24 hours\' AND name = \'page_view\'');
-          pageViews = parseInt(eventRes.rows[0].count) || 0;
-          
-          const conversionRes = await pool.query('SELECT COUNT(*) as count FROM events WHERE ts > NOW() - INTERVAL \'24 hours\' AND name IN (\'add_to_cart\', \'checkout_started\', \'purchase\')');
-          const conversions = parseInt(conversionRes.rows[0].count) || 0;
-          conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
-        } catch (err) {
-          fastify.log.error({ err }, 'Database error in WebSocket');
-        }
-      }
 
       const data = {
         type: 'dashboard_update',
@@ -1013,6 +968,7 @@ async function bootstrap(): Promise<void> {
       console.error('WebSocket error:', err);
       clearInterval(interval);
     });
+  });
   });
 
   // Collect endpoint
@@ -1106,32 +1062,8 @@ async function bootstrap(): Promise<void> {
         fastify.log.error({ err }, 'Supabase collect error');
         return reply.code(500).send({ ok: false, error: 'supabase_error' });
       }
-    } else if (hasDb && pool) {
-      // Upsert shop by domain
-      const shopRes = await pool.query(
-        'insert into shops(domain) values ($1) on conflict(domain) do update set domain=excluded.domain returning id',
-        [body.shop_domain]
-      );
-      const shopId: string = shopRes.rows[0].id;
-
-      // Upsert session
-      const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
-      const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
-      const ua = (req.headers['user-agent'] as string) || null;
-      const ref = body.page?.ref || null;
-      await pool.query(
-        'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
-        [body.session_id, shopId, ip, ua, ref]
-      );
-
-      // Insert event
-      const tsMs = body.ts ?? Date.now();
-      await pool.query(
-        'insert into events(shop_id, session_id, name, ts, page_path, payload, event_id) values ($1,$2,$3, to_timestamp($4/1000.0), $5, $6, $7) on conflict(event_id) do nothing',
-        [shopId, body.session_id, body.event, tsMs, body.page?.path || null, body.payload ?? null, body.event_id || null]
-      );
     } else {
-      return reply.send({ ok: true, note: 'no_db_dev' });
+      return reply.send({ ok: true, note: 'no_supabase' });
     }
 
     reply.send({ ok: true });
