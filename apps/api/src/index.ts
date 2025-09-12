@@ -2,8 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { z } from 'zod';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool } from 'pg';
+// PostgreSQL imports removed - using only Supabase
 import Redis from 'ioredis';
 import { Redis as UpstashRedis } from '@upstash/redis';
 import crypto from 'node:crypto';
@@ -27,10 +26,7 @@ async function bootstrap(): Promise<void> {
   //   skipOnError: true,
   // });
 
-  // DB bağlantısı opsiyonel: DEV ortamında DATABASE_URL yoksa graceful degrade
-  const hasDb = !!process.env.DATABASE_URL;
-  const pool = hasDb ? new Pool({ connectionString: process.env.DATABASE_URL }) : null as unknown as Pool;
-  const db = hasDb ? drizzle(pool) : (null as any);
+  // PostgreSQL kaldırıldı - sadece Supabase kullanıyoruz
   
   // Supabase client
   const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -524,24 +520,12 @@ async function bootstrap(): Promise<void> {
         pageViews = Math.floor(Math.random() * 2000) + 500;
         conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
       }
-    } else if (hasDb && pool) {
-      try {
-        const sessionRes = await pool.query('SELECT COUNT(*) as count FROM sessions WHERE last_seen > NOW() - INTERVAL \'24 hours\'');
-        totalSessions = parseInt(sessionRes.rows[0].count) || 0;
-        
-        const eventRes = await pool.query('SELECT COUNT(*) as count FROM events WHERE ts > NOW() - INTERVAL \'24 hours\' AND name = \'page_view\'');
-        pageViews = parseInt(eventRes.rows[0].count) || 0;
-        
-        const conversionRes = await pool.query('SELECT COUNT(*) as count FROM events WHERE ts > NOW() - INTERVAL \'24 hours\' AND name IN (\'add_to_cart\', \'checkout_started\', \'purchase\')');
-        const conversions = parseInt(conversionRes.rows[0].count) || 0;
-        conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
-      } catch (err) {
-        fastify.log.error({ err }, 'Database error in dashboard API');
-        // Fallback to demo data
-        totalSessions = Math.floor(Math.random() * 500) + 100;
-        pageViews = Math.floor(Math.random() * 2000) + 500;
-        conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
-      }
+    } else {
+      // Fallback to demo data when no Supabase
+      totalSessions = Math.floor(Math.random() * 500) + 100;
+      pageViews = Math.floor(Math.random() * 2000) + 500;
+      conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
+    }
     } else {
       // Demo data when no database
       totalSessions = Math.floor(Math.random() * 500) + 100;
@@ -1214,20 +1198,17 @@ async function bootstrap(): Promise<void> {
         event_id: z.string().max(100).optional(),
       }).parse(req.body);
 
-      // Debug: Hangi veritabanının kullanıldığını kontrol et
-      console.log('🔍 DATABASE DEBUG:', {
+      // Debug: Supabase kullanımını kontrol et
+      console.log('🔍 SUPABASE DEBUG:', {
         hasSupabase: !!supabase,
-        hasDb: hasDb,
-        hasPool: !!pool,
         supabaseUrl: process.env.SUPABASE_URL ? 'SET' : 'NOT_SET',
-        databaseUrl: process.env.DATABASE_URL ? 'SET' : 'NOT_SET',
         event: body.event,
         sessionId: body.session_id
       });
 
       // Force log to stdout for Railway
-      process.stdout.write(`\n🔍 DATABASE DEBUG: hasSupabase=${!!supabase}, hasDb=${hasDb}, hasPool=${!!pool}\n`);
-      process.stdout.write(`🔍 ENV VARS: SUPABASE_URL=${process.env.SUPABASE_URL ? 'SET' : 'NOT_SET'}, DATABASE_URL=${process.env.DATABASE_URL ? 'SET' : 'NOT_SET'}\n`);
+      process.stdout.write(`\n🔍 SUPABASE DEBUG: hasSupabase=${!!supabase}\n`);
+      process.stdout.write(`🔍 ENV VARS: SUPABASE_URL=${process.env.SUPABASE_URL ? 'SET' : 'NOT_SET'}\n`);
 
       if (supabase) {
         try {
@@ -1328,47 +1309,15 @@ async function bootstrap(): Promise<void> {
           fastify.log.error({ err }, 'Supabase app-proxy collect error');
           return reply.code(500).send({ ok: false, error: 'supabase_error' });
         }
-      } else if (hasDb && pool && !supabase) {
-        // shops upsert
-        const shopRes = await pool.query(
-          'insert into shops(domain) values ($1) on conflict(domain) do update set domain=excluded.domain returning id',
-          [body.shop_domain]
-        );
-        const shopId: string = shopRes.rows[0].id;
-
-        // sessions upsert - her event'te session'ı güncelle
-        const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
-        const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
-        const ua = (req.headers['user-agent'] as string) || null;
-        const ref = body.page?.ref || null;
-        
-        console.log('🔄 UPSERTING SESSION (PostgreSQL):', body.session_id);
-        
-        await pool.query(
-          'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
-          [body.session_id, shopId, ip, ua, ref]
-        );
-        
-        console.log('✅ SESSION UPSERTED SUCCESSFULLY (PostgreSQL):', body.session_id);
-
-        // events insert
-        const tsMs = body.ts ?? Date.now();
-        await pool.query(
-          'insert into events(shop_id, session_id, name, ts, page_path, payload, event_id) values ($1,$2,$3, to_timestamp($4/1000.0), $5, $6, $7) on conflict(event_id) do nothing',
-          [shopId, body.session_id, body.event, tsMs, body.page?.path || null, body.payload ?? null, body.event_id || null]
-        );
       } else {
-        return reply.send({ ok: true, note: 'no_db_dev' });
+        return reply.send({ ok: true, note: 'no_supabase' });
       }
 
       return reply.send({ 
         ok: true, 
         debug: {
           hasSupabase: !!supabase,
-          hasDb: hasDb,
-          hasPool: !!pool,
-          supabaseUrl: process.env.SUPABASE_URL ? 'SET' : 'NOT_SET',
-          databaseUrl: process.env.DATABASE_URL ? 'SET' : 'NOT_SET'
+          supabaseUrl: process.env.SUPABASE_URL ? 'SET' : 'NOT_SET'
         }
       });
     } catch (err) {
