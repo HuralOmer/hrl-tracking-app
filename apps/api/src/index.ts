@@ -1178,6 +1178,16 @@ async function bootstrap(): Promise<void> {
           // Session'ı upsert et - her event'te session'ı güncelle
           console.log('🔄 UPSERTING SESSION (Supabase):', sessionId);
           
+          // Önce mevcut session'ı kontrol et
+          const { data: existingSession } = await supabase
+            .from('sessions')
+            .select('id, first_seen')
+            .eq('id', sessionId)
+            .single();
+          
+          const now = new Date().toISOString();
+          const isNewSession = !existingSession;
+          
           const { error: sessionError } = await supabase
             .from('sessions')
             .upsert({
@@ -1186,8 +1196,8 @@ async function bootstrap(): Promise<void> {
               session_id: sessionId,
               ip_address: ip,
               user_agent: ua,
-              first_seen: new Date().toISOString(),
-              last_seen: new Date().toISOString()
+              first_seen: isNewSession ? now : existingSession?.first_seen || now,
+              last_seen: now
             }, { 
               onConflict: 'id',
               ignoreDuplicates: false 
@@ -1196,7 +1206,7 @@ async function bootstrap(): Promise<void> {
           if (sessionError) {
             fastify.log.error({ err: sessionError }, 'Supabase session upsert error (app-proxy)');
           } else {
-            console.log('✅ SESSION UPSERTED SUCCESSFULLY (Supabase):', sessionId);
+            console.log(`✅ SESSION UPSERTED SUCCESSFULLY (Supabase): ${sessionId} - ${isNewSession ? 'NEW' : 'EXISTING'}`);
           }
 
           // Insert event
