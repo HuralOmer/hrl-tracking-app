@@ -115,11 +115,11 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours (using page_views table - unique sessions)
+        // Get total sessions from last 24 hours (using events table - unique sessions)
         const { data: sessionData, error: sessionError } = await supabase
-          .from('page_views')
+          .from('events')
           .select('session_id')
-          .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
         if (!sessionError) {
           // Benzersiz session'ları say
@@ -242,11 +242,11 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours (using page_views table - unique sessions)
+        // Get total sessions from last 24 hours (using events table - unique sessions)
         const { data: sessionData, error: sessionError } = await supabase
-          .from('page_views')
+          .from('events')
           .select('session_id')
-          .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
         if (!sessionError) {
           // Benzersiz session'ları say
