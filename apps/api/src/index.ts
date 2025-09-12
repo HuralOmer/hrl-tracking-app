@@ -871,8 +871,10 @@ async function bootstrap(): Promise<void> {
     (req.raw as any).on('close', () => clearInterval(interval));
   });
 
-  // WebSocket endpoint for real-time updates
-  fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
+  // WebSocket endpoint removed for now - focus on session tracking
+  // fastify.get('/ws', { websocket: true }, (connection: any, req: any) => {
+  // WebSocket handler commented out for now
+  /*
     const q = (req.query as any) as Record<string, string>;
     const shop = q.shop as string || 'ecomxtrade.myshopify.com';
     
@@ -968,6 +970,7 @@ async function bootstrap(): Promise<void> {
       clearInterval(interval);
     });
   });
+  */
 
   // Collect endpoint
   fastify.post('/collect', async (req: any, reply: any) => {
