@@ -881,7 +881,6 @@ async function bootstrap(): Promise<void> {
             .insert({
               id: crypto.randomUUID(),
               shop_id: shopId,
-              user_id: userId,
               session_id: newSessionId,
               ip_address: ip,
               user_agent: ua,
