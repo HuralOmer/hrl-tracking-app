@@ -707,13 +707,16 @@ async function bootstrap(): Promise<void> {
         const userId = `user_${userFingerprint}`;
         
         // Insert user session (her oturum ayrı kayıt, ama aynı user_id)
+        // Her girişte yeni session_id oluştur
+        const newSessionId = crypto.randomUUID();
+        
         const { error: userError } = await supabase
           .from('users')
           .insert({
             id: crypto.randomUUID(),
             shop_id: shopId,
             user_id: userId,
-            session_id: body.session_id,
+            session_id: newSessionId,
             ip_address: ip,
             user_agent: ua,
             first_seen: new Date().toISOString(),
@@ -731,7 +734,7 @@ async function bootstrap(): Promise<void> {
           .insert({
             shop_id: shopId,
             user_id: userId,
-            session_id: body.session_id,
+            session_id: newSessionId,
             event_name: body.event,
             created_at: new Date(tsMs).toISOString(),
             event_data: body.payload ?? null
@@ -747,8 +750,7 @@ async function bootstrap(): Promise<void> {
             .from('page_views')
             .insert({
               shop_id: shopId,
-              user_id: userId,
-              session_id: body.session_id,
+              session_id: newSessionId,
               url: body.page?.path || '/',
               title: body.page?.title || '',
               referrer: body.page?.ref || null,
@@ -887,13 +889,16 @@ async function bootstrap(): Promise<void> {
           const userId = `user_${userFingerprint}`;
           
           // Insert user session (her oturum ayrı kayıt, ama aynı user_id)
+          // Her girişte yeni session_id oluştur
+          const newSessionId = crypto.randomUUID();
+          
           const { error: userError } = await supabase
             .from('users')
             .insert({
               id: crypto.randomUUID(),
               shop_id: shopId,
               user_id: userId,
-              session_id: body.session_id,
+              session_id: newSessionId,
               ip_address: ip,
               user_agent: ua,
               first_seen: new Date().toISOString(),
@@ -911,7 +916,7 @@ async function bootstrap(): Promise<void> {
             .insert({
               shop_id: shopId,
               user_id: userId,
-              session_id: body.session_id,
+              session_id: newSessionId,
               event_name: body.event,
               created_at: new Date(tsMs).toISOString(),
               event_data: body.payload ?? null
@@ -927,8 +932,7 @@ async function bootstrap(): Promise<void> {
               .from('page_views')
               .insert({
                 shop_id: shopId,
-                user_id: userId,
-                session_id: body.session_id,
+                session_id: newSessionId,
                 url: body.page?.path || '/',
                 title: body.page?.title || '',
                 referrer: body.page?.ref || null,
