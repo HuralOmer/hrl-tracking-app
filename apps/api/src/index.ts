@@ -878,6 +878,13 @@ async function bootstrap(): Promise<void> {
           // Session ID'yi client'tan al (localStorage'dan geliyor)
           const sessionId = body.session_id;
           
+          console.log('🎯 COLLECT DEBUG:', {
+            event: body.event,
+            sessionId: sessionId,
+            shopId: shopId,
+            timestamp: new Date().toISOString()
+          });
+          
           // Sadece page_view event'inde yeni session oluştur
           if (body.event === 'page_view') {
             // Bu session daha önce var mı kontrol et
@@ -888,8 +895,15 @@ async function bootstrap(): Promise<void> {
               .eq('shop_id', shopId)
               .maybeSingle();
             
+            console.log('🔍 SESSION CHECK:', {
+              sessionId: sessionId,
+              existingSession: !!existingSession,
+              isNewSession: !existingSession
+            });
+            
             // Sadece yeni session ise user kaydı oluştur
             if (!existingSession) {
+              console.log('✅ CREATING NEW SESSION:', sessionId);
               const { error: userError } = await supabase
                 .from('users')
                 .insert({
@@ -937,6 +951,12 @@ async function bootstrap(): Promise<void> {
 
           // Insert page view if it's a page_view event
           if (body.event === 'page_view') {
+            console.log('📄 INSERTING PAGE VIEW:', {
+              sessionId: sessionId,
+              url: body.page?.path || '/',
+              title: body.page?.title || ''
+            });
+            
             const { error: pageViewError } = await supabase
               .from('page_views')
               .insert({
