@@ -112,20 +112,25 @@ async function bootstrap(): Promise<void> {
     return uuidRegex.test(uuid);
   }
   
-  // Get or create session ID - Mevcut session'ı kullan veya yeni oluştur
+  // Get or create session ID - Her ziyarette yeni session oluştur
   function getSessionId() {
-    // Önce localStorage'dan mevcut session'ı kontrol et
-    let sessionId = localStorage.getItem('ecomxtrade_session_id');
-    
-    // Eğer session yoksa veya geçersizse yeni oluştur
-    if (!sessionId || !isValidUUID(sessionId)) {
-      sessionId = generateSessionId();
-      localStorage.setItem('ecomxtrade_session_id', sessionId);
-      console.log('🆕🆕🆕 NEW SESSION ID GENERATED v2.1:', sessionId);
-      console.log('🆕🆕🆕 TIMESTAMP:', new Date().toISOString());
-    } else {
-      console.log('♻️♻️♻️ REUSING EXISTING SESSION v2.1:', sessionId);
+    // Base session ID'yi localStorage'dan al veya oluştur
+    let baseSessionId = localStorage.getItem('ecomxtrade_session_id');
+    if (!baseSessionId || !isValidUUID(baseSessionId)) {
+      baseSessionId = generateSessionId();
+      localStorage.setItem('ecomxtrade_session_id', baseSessionId);
     }
+    
+    // Visit number'ı localStorage'dan al ve artır
+    let visitNo = parseInt(localStorage.getItem('ecomxtrade_visit_no') || '0') + 1;
+    localStorage.setItem('ecomxtrade_visit_no', visitNo.toString());
+    
+    // Benzersiz session ID oluştur: baseSessionId + visitNo
+    const sessionId = `${baseSessionId}-v${visitNo}`;
+    
+    console.log('🆕🆕🆕 NEW VISIT SESSION v2.1:', sessionId);
+    console.log('🆕🆕🆕 VISIT NUMBER:', visitNo);
+    console.log('🆕🆕🆕 TIMESTAMP:', new Date().toISOString());
     
     return sessionId;
   }
@@ -1188,6 +1193,9 @@ async function bootstrap(): Promise<void> {
           const now = new Date().toISOString();
           const isNewSession = !existingSession;
           
+          // Visit number'ı session_id'den çıkar
+          const visitNo = sessionId.includes('-v') ? parseInt(sessionId.split('-v')[1]) : 1;
+          
           const { error: sessionError } = await supabase
             .from('sessions')
             .upsert({
@@ -1197,7 +1205,8 @@ async function bootstrap(): Promise<void> {
               ip_address: ip,
               user_agent: ua,
               first_seen: isNewSession ? now : existingSession?.first_seen || now,
-              last_seen: now
+              last_seen: now,
+              visit_no: visitNo
             }, { 
               onConflict: 'id',
               ignoreDuplicates: false 
