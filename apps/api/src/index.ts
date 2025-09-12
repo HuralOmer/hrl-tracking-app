@@ -80,7 +80,7 @@ async function bootstrap(): Promise<void> {
     (redis as any).on('error', (err: any) => fastify.log.error({ err }, 'redis error'));
   }
 
-  const ACTIVE_WINDOW_SEC = 60;
+  const ACTIVE_WINDOW_SEC = 30; // 30 saniye - sayfa kapandığında hızlı offline
 
   // Health check
   fastify.get('/health', async () => ({ ok: true }));

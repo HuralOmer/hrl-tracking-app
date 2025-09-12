@@ -11,6 +11,11 @@
   let leaderTabId = null;
   let heartbeatInterval = null;
   
+  // Activity tracking
+  let lastActivityTime = Date.now();
+  let activityTimeout = null;
+  const INACTIVITY_TIMEOUT = 4 * 60 * 1000; // 4 dakika
+  
   // Generate session ID (UUID format)
   function generateSessionId() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -84,11 +89,56 @@
       initializeLeaderTab();
     }
   }
+
+  // Activity detection - kullanıcı aktif mi?
+  function updateActivity() {
+    lastActivityTime = Date.now();
+    
+    // Clear existing timeout
+    if (activityTimeout) {
+      clearTimeout(activityTimeout);
+    }
+    
+    // Set new timeout - 4 dakika sonra offline kabul et
+    activityTimeout = setTimeout(() => {
+      console.log('User inactive for 4 minutes, stopping heartbeat');
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+    }, INACTIVITY_TIMEOUT);
+  }
+
+  // Activity events - kullanıcı hareket ettiğinde
+  function setupActivityDetection() {
+    const activityEvents = [
+      'mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'
+    ];
+    
+    activityEvents.forEach(event => {
+      document.addEventListener(event, updateActivity, true);
+    });
+    
+    // Video events - video izleme aktif sayılır
+    document.addEventListener('play', updateActivity, true);
+    document.addEventListener('pause', updateActivity, true);
+    document.addEventListener('timeupdate', updateActivity, true);
+    
+    // Initial activity
+    updateActivity();
+  }
   
-  // Presence heartbeat fonksiyonu (sadece lider sekme)
+  // Presence heartbeat fonksiyonu (sadece lider sekme ve aktif kullanıcı)
   function sendPresenceHeartbeat() {
     // Only send heartbeat if this is the leader tab
     if (!isLeaderTab) {
+      return;
+    }
+    
+    // Check if user is still active (within 4 minutes)
+    const now = Date.now();
+    if (now - lastActivityTime > INACTIVITY_TIMEOUT) {
+      console.log('User inactive, skipping heartbeat');
       return;
     }
     
@@ -96,7 +146,7 @@
     const heartbeatData = {
       shop: SHOP_DOMAIN,
       session_id: sessionId,
-      ts: Date.now()
+      ts: now
     };
 
     fetch(`${TRACKING_URL}/presence/beat`, {
@@ -190,17 +240,20 @@
     // Initialize leader tab management
     initializeLeaderTab();
     
+    // Setup activity detection
+    setupActivityDetection();
+    
     // Track initial page view
     trackPageView();
     
     // Send initial presence heartbeat (only if leader)
     sendPresenceHeartbeat();
     
-    // Start presence heartbeat (10 saniyede bir) - only leader tab
+    // Start presence heartbeat (5 saniyede bir) - only leader tab
     heartbeatInterval = setInterval(() => {
       checkLeaderStatus();
       sendPresenceHeartbeat();
-    }, 10000);
+    }, 5000);
     
     // Track page changes (SPA support)
     let lastUrl = window.location.href;
@@ -250,10 +303,20 @@
 
     // Page unload events - sendBeacon kullan
     window.addEventListener('beforeunload', function() {
+      // Clear activity timeout
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
+        activityTimeout = null;
+      }
       trackEvent('beforeunload');
     });
 
     window.addEventListener('unload', function() {
+      // Clear activity timeout
+      if (activityTimeout) {
+        clearTimeout(activityTimeout);
+        activityTimeout = null;
+      }
       trackEvent('unload');
     });
   }
