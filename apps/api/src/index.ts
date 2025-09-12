@@ -123,13 +123,21 @@ async function bootstrap(): Promise<void> {
     return uuidRegex.test(uuid);
   }
   
-  // Get or create session ID - Her girişte yeni session
+  // Get or create session ID - Mevcut session'ı kullan veya yeni oluştur
   function getSessionId() {
-    // Her sayfa yüklendiğinde yeni session oluştur
-    const sessionId = generateSessionId();
-    localStorage.setItem('ecomxtrade_session_id', sessionId);
-    console.log('🆕🆕🆕 NEW SESSION ID GENERATED v2.1:', sessionId);
-    console.log('🆕🆕🆕 TIMESTAMP:', new Date().toISOString());
+    // Önce localStorage'dan mevcut session'ı kontrol et
+    let sessionId = localStorage.getItem('ecomxtrade_session_id');
+    
+    // Eğer session yoksa veya geçersizse yeni oluştur
+    if (!sessionId || !isValidUUID(sessionId)) {
+      sessionId = generateSessionId();
+      localStorage.setItem('ecomxtrade_session_id', sessionId);
+      console.log('🆕🆕🆕 NEW SESSION ID GENERATED v2.1:', sessionId);
+      console.log('🆕🆕🆕 TIMESTAMP:', new Date().toISOString());
+    } else {
+      console.log('♻️♻️♻️ REUSING EXISTING SESSION v2.1:', sessionId);
+    }
+    
     return sessionId;
   }
 
@@ -1238,24 +1246,29 @@ async function bootstrap(): Promise<void> {
             timestamp: new Date().toISOString()
           });
           
-          // Her page_view event'inde yeni session oluştur
+          // Session'ı upsert et (varsa güncelle, yoksa oluştur)
           if (body.event === 'page_view') {
-            console.log('✅ CREATING NEW SESSION:', sessionId);
+            console.log('🔄 UPSERTING SESSION:', sessionId);
             
             const { error: sessionError } = await supabase
               .from('sessions')
-              .insert({
-                id: crypto.randomUUID(),
+              .upsert({
+                id: sessionId, // session_id'yi id olarak kullan
                 shop_id: shopId,
                 session_id: sessionId,
                 ip_address: ip,
                 user_agent: ua,
                 first_seen: new Date().toISOString(),
                 last_seen: new Date().toISOString()
+              }, { 
+                onConflict: 'id',
+                ignoreDuplicates: false 
               });
             
             if (sessionError) {
-              fastify.log.error({ err: sessionError }, 'Supabase session insert error (app-proxy)');
+              fastify.log.error({ err: sessionError }, 'Supabase session upsert error (app-proxy)');
+            } else {
+              console.log('✅ SESSION UPSERTED SUCCESSFULLY:', sessionId);
             }
           }
 
@@ -1310,15 +1323,17 @@ async function bootstrap(): Promise<void> {
         );
         const shopId: string = shopRes.rows[0].id;
 
-        // sessions upsert
-        const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
-        const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
-        const ua = (req.headers['user-agent'] as string) || null;
-        const ref = body.page?.ref || null;
-        await pool.query(
-          'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
-          [body.session_id, shopId, ip, ua, ref]
-        );
+        // sessions upsert - sadece page_view event'inde
+        if (body.event === 'page_view') {
+          const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
+          const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
+          const ua = (req.headers['user-agent'] as string) || null;
+          const ref = body.page?.ref || null;
+          await pool.query(
+            'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
+            [body.session_id, shopId, ip, ua, ref]
+          );
+        }
 
         // events insert
         const tsMs = body.ts ?? Date.now();
