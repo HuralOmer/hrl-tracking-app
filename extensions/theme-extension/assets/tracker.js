@@ -109,7 +109,7 @@
     });
   }
 
-  // Track event
+  // Track event - Hibrit sistem
   function trackEvent(eventName, payload = {}) {
     const sessionId = getSessionId();
     const eventData = {
@@ -126,16 +126,35 @@
       event_id: 'event_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
     };
     
-    // Send to tracking endpoint
-    fetch(`${TRACKING_URL}/app-proxy/collect`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(eventData)
-    }).catch(err => {
-      console.error('Event tracking failed:', err.message);
-    });
+    // Critical event'ler için sendBeacon kullan (tarayıcı kapanırken çalışır)
+    const criticalEvents = ['page_view', 'beforeunload', 'unload'];
+    
+    if (criticalEvents.includes(eventName) && navigator.sendBeacon) {
+      // sendBeacon kullan - daha güvenilir ama debug zor
+      const success = navigator.sendBeacon(
+        `${TRACKING_URL}/app-proxy/collect`,
+        JSON.stringify(eventData)
+      );
+      
+      if (!success) {
+        console.warn('sendBeacon failed, falling back to fetch');
+        // Fallback to fetch
+        fetch(`${TRACKING_URL}/app-proxy/collect`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(eventData)
+        }).catch(err => console.error('Event tracking failed:', err.message));
+      }
+    } else {
+      // Normal event'ler için fetch kullan - debug kolay
+      fetch(`${TRACKING_URL}/app-proxy/collect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(eventData)
+      }).catch(err => {
+        console.error('Event tracking failed:', err.message);
+      });
+    }
   }
   
   // Track page view
@@ -227,6 +246,15 @@
     // Focus - pencere odaklandığında heartbeat gönder
     window.addEventListener('focus', function() {
       sendPresenceHeartbeat();
+    });
+
+    // Page unload events - sendBeacon kullan
+    window.addEventListener('beforeunload', function() {
+      trackEvent('beforeunload');
+    });
+
+    window.addEventListener('unload', function() {
+      trackEvent('unload');
     });
   }
   
