@@ -399,7 +399,7 @@ async function bootstrap(): Promise<void> {
           async function fetchData() {
             try {
               // Fetch all dashboard data from API
-              const response = await fetch('/api/dashboard?t=' + Date.now());
+              const response = await fetch('https://hrl-tracking-app-production.up.railway.app/api/dashboard?t=' + Date.now());
               const data = await response.json();
               
               // Update all metrics
