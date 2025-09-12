@@ -51,13 +51,13 @@ async function bootstrap(): Promise<void> {
       )
       .subscribe();
     
-    // Subscribe to sessions table changes
+    // Subscribe to users table changes
     supabase
-      .channel('sessions_changes')
+      .channel('users_changes')
       .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'sessions' },
+        { event: 'UPDATE', schema: 'public', table: 'users' },
         (payload) => {
-          fastify.log.info({ payload }, 'Session updated via real-time');
+          fastify.log.info({ payload }, 'User updated via real-time');
         }
       )
       .subscribe();
@@ -115,9 +115,9 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours
+        // Get total sessions from last 24 hours (using users table)
         const { data: sessionData, error: sessionError } = await supabase
-          .from('sessions')
+          .from('users')
           .select('id')
           .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
@@ -125,23 +125,22 @@ async function bootstrap(): Promise<void> {
           totalSessions = sessionData?.length || 0;
         }
 
-        // Get page views from last 24 hours
-        const { data: eventData, error: eventError } = await supabase
-          .from('events')
+        // Get page views from last 24 hours (using page_views table)
+        const { data: pageViewData, error: pageViewError } = await supabase
+          .from('page_views')
           .select('id')
-          .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-          .eq('name', 'page_view');
+          .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
-        if (!eventError) {
-          pageViews = eventData?.length || 0;
+        if (!pageViewError) {
+          pageViews = pageViewData?.length || 0;
         }
 
-        // Get conversions from last 24 hours
+        // Get conversions from last 24 hours (using events table)
         const { data: conversionData, error: conversionError } = await supabase
           .from('events')
           .select('id')
-          .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-          .in('name', ['add_to_cart', 'checkout_started', 'purchase']);
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .in('event_name', ['add_to_cart', 'checkout_started', 'purchase']);
         
         if (!conversionError) {
           const conversions = conversionData?.length || 0;
@@ -241,9 +240,9 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours
+        // Get total sessions from last 24 hours (using users table)
         const { data: sessionData, error: sessionError } = await supabase
-          .from('sessions')
+          .from('users')
           .select('id')
           .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
@@ -251,23 +250,22 @@ async function bootstrap(): Promise<void> {
           totalSessions = sessionData?.length || 0;
         }
 
-        // Get page views from last 24 hours
-        const { data: eventData, error: eventError } = await supabase
-          .from('events')
+        // Get page views from last 24 hours (using page_views table)
+        const { data: pageViewData, error: pageViewError } = await supabase
+          .from('page_views')
           .select('id')
-          .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-          .eq('name', 'page_view');
+          .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
         
-        if (!eventError) {
-          pageViews = eventData?.length || 0;
+        if (!pageViewError) {
+          pageViews = pageViewData?.length || 0;
         }
 
-        // Get conversions from last 24 hours
+        // Get conversions from last 24 hours (using events table)
         const { data: conversionData, error: conversionError } = await supabase
           .from('events')
           .select('id')
-          .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-          .in('name', ['add_to_cart', 'checkout_started', 'purchase']);
+          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+          .in('event_name', ['add_to_cart', 'checkout_started', 'purchase']);
         
         if (!conversionError) {
           const conversions = conversionData?.length || 0;
@@ -583,9 +581,9 @@ async function bootstrap(): Promise<void> {
       // Get database stats if available
       if (supabase) {
         try {
-          // Get total sessions from last 24 hours
+          // Get total sessions from last 24 hours (using users table)
           const { data: sessionData, error: sessionError } = await supabase
-            .from('sessions')
+            .from('users')
             .select('id')
             .gte('last_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
           
@@ -593,23 +591,22 @@ async function bootstrap(): Promise<void> {
             totalSessions = sessionData?.length || 0;
           }
 
-          // Get page views from last 24 hours
-          const { data: eventData, error: eventError } = await supabase
-            .from('events')
+          // Get page views from last 24 hours (using page_views table)
+          const { data: pageViewData, error: pageViewError } = await supabase
+            .from('page_views')
             .select('id')
-            .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-            .eq('name', 'page_view');
+            .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
           
-          if (!eventError) {
-            pageViews = eventData?.length || 0;
+          if (!pageViewError) {
+            pageViews = pageViewData?.length || 0;
           }
 
-          // Get conversions from last 24 hours
+          // Get conversions from last 24 hours (using events table)
           const { data: conversionData, error: conversionError } = await supabase
             .from('events')
             .select('id')
-            .gte('ts', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-            .in('name', ['add_to_cart', 'checkout_started', 'purchase']);
+            .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+            .in('event_name', ['add_to_cart', 'checkout_started', 'purchase']);
           
           if (!conversionError) {
             const conversions = conversionData?.length || 0;
@@ -694,26 +691,26 @@ async function bootstrap(): Promise<void> {
         
         const shopId = shopData.id;
 
-        // Upsert session
+        // Upsert user (session)
         const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
         const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
         const ua = (req.headers['user-agent'] as string) || null;
         const ref = body.page?.ref || null;
         
-        const { error: sessionError } = await supabase
-          .from('sessions')
+        const { error: userError } = await supabase
+          .from('users')
           .upsert({
-            id: body.session_id,
+            id: crypto.randomUUID(),
             shop_id: shopId,
+            session_id: body.session_id,
+            ip_address: ip,
+            user_agent: ua,
             first_seen: new Date().toISOString(),
-            last_seen: new Date().toISOString(),
-            ip: ip,
-            ua: ua,
-            referrer: ref
-          }, { onConflict: 'id' });
+            last_seen: new Date().toISOString()
+          }, { onConflict: 'session_id' });
         
-        if (sessionError) {
-          fastify.log.error({ err: sessionError }, 'Supabase session upsert error');
+        if (userError) {
+          fastify.log.error({ err: userError }, 'Supabase user upsert error');
         }
 
         // Insert event
@@ -723,15 +720,31 @@ async function bootstrap(): Promise<void> {
           .insert({
             shop_id: shopId,
             session_id: body.session_id,
-            name: body.event,
-            ts: new Date(tsMs).toISOString(),
-            page_path: body.page?.path || null,
-            payload: body.payload ?? null,
-            event_id: body.event_id || null
+            event_name: body.event,
+            created_at: new Date(tsMs).toISOString(),
+            event_data: body.payload ?? null
           });
         
         if (eventError) {
           fastify.log.error({ err: eventError }, 'Supabase event insert error');
+        }
+
+        // Insert page view if it's a page_view event
+        if (body.event === 'page_view') {
+          const { error: pageViewError } = await supabase
+            .from('page_views')
+            .insert({
+              shop_id: shopId,
+              session_id: body.session_id,
+              url: body.page?.path || '/',
+              title: body.page?.title || '',
+              referrer: body.page?.ref || null,
+              viewed_at: new Date(tsMs).toISOString()
+            });
+          
+          if (pageViewError) {
+            fastify.log.error({ err: pageViewError }, 'Supabase page view insert error');
+          }
         }
       } catch (err) {
         fastify.log.error({ err }, 'Supabase collect error');
@@ -845,26 +858,26 @@ async function bootstrap(): Promise<void> {
           
           const shopId = shopData.id;
 
-          // Upsert session
+          // Upsert user (session)
           const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
           const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
           const ua = (req.headers['user-agent'] as string) || null;
           const ref = body.page?.ref || null;
           
-          const { error: sessionError } = await supabase
-            .from('sessions')
+          const { error: userError } = await supabase
+            .from('users')
             .upsert({
-              id: body.session_id,
+              id: crypto.randomUUID(),
               shop_id: shopId,
+              session_id: body.session_id,
+              ip_address: ip,
+              user_agent: ua,
               first_seen: new Date().toISOString(),
-              last_seen: new Date().toISOString(),
-              ip: ip,
-              ua: ua,
-              referrer: ref
-            }, { onConflict: 'id' });
+              last_seen: new Date().toISOString()
+            }, { onConflict: 'session_id' });
           
-          if (sessionError) {
-            fastify.log.error({ err: sessionError }, 'Supabase session upsert error (app-proxy)');
+          if (userError) {
+            fastify.log.error({ err: userError }, 'Supabase user upsert error (app-proxy)');
           }
 
           // Insert event
@@ -874,15 +887,31 @@ async function bootstrap(): Promise<void> {
             .insert({
               shop_id: shopId,
               session_id: body.session_id,
-              name: body.event,
-              ts: new Date(tsMs).toISOString(),
-              page_path: body.page?.path || null,
-              payload: body.payload ?? null,
-              event_id: body.event_id || null
+              event_name: body.event,
+              created_at: new Date(tsMs).toISOString(),
+              event_data: body.payload ?? null
             });
           
           if (eventError) {
             fastify.log.error({ err: eventError }, 'Supabase event insert error (app-proxy)');
+          }
+
+          // Insert page view if it's a page_view event
+          if (body.event === 'page_view') {
+            const { error: pageViewError } = await supabase
+              .from('page_views')
+              .insert({
+                shop_id: shopId,
+                session_id: body.session_id,
+                url: body.page?.path || '/',
+                title: body.page?.title || '',
+                referrer: body.page?.ref || null,
+                viewed_at: new Date(tsMs).toISOString()
+              });
+            
+            if (pageViewError) {
+              fastify.log.error({ err: pageViewError }, 'Supabase page view insert error (app-proxy)');
+            }
           }
         } catch (err) {
           fastify.log.error({ err }, 'Supabase app-proxy collect error');
