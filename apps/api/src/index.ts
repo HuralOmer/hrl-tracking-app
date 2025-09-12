@@ -728,10 +728,10 @@ async function bootstrap(): Promise<void> {
           fastify.log.error({ err: userError }, 'Supabase user insert error');
         }
 
-        // Upsert user visit (kullanıcı ziyaret sayısını takip et)
+        // Insert user visit (her giriş ayrı kayıt)
         const { error: visitError } = await supabase
           .from('user_visits')
-          .upsert({
+          .insert({
             shop_id: shopId,
             user_fingerprint: userFingerprint,
             visit_count: 1,
@@ -740,13 +740,10 @@ async function bootstrap(): Promise<void> {
             total_page_views: 1,
             device_type: 'desktop', // Basit device detection
             browser: ua?.split(' ')[0] || 'unknown'
-          }, { 
-            onConflict: 'shop_id,user_fingerprint',
-            ignoreDuplicates: false 
           });
         
         if (visitError) {
-          fastify.log.error({ err: visitError }, 'Supabase user visit upsert error');
+          fastify.log.error({ err: visitError }, 'Supabase user visit insert error');
         }
 
         // Insert event
@@ -932,10 +929,10 @@ async function bootstrap(): Promise<void> {
             fastify.log.error({ err: userError }, 'Supabase user insert error (app-proxy)');
           }
 
-          // Upsert user visit (kullanıcı ziyaret sayısını takip et)
+          // Insert user visit (her giriş ayrı kayıt)
           const { error: visitError } = await supabase
             .from('user_visits')
-            .upsert({
+            .insert({
               shop_id: shopId,
               user_fingerprint: userFingerprint,
               visit_count: 1,
@@ -944,13 +941,10 @@ async function bootstrap(): Promise<void> {
               total_page_views: 1,
               device_type: 'desktop', // Basit device detection
               browser: ua?.split(' ')[0] || 'unknown'
-            }, { 
-              onConflict: 'shop_id,user_fingerprint',
-              ignoreDuplicates: false 
             });
           
           if (visitError) {
-            fastify.log.error({ err: visitError }, 'Supabase user visit upsert error (app-proxy)');
+            fastify.log.error({ err: visitError }, 'Supabase user visit insert error (app-proxy)');
           }
 
           // Insert event
