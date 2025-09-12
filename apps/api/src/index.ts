@@ -1246,30 +1246,28 @@ async function bootstrap(): Promise<void> {
             timestamp: new Date().toISOString()
           });
           
-          // Session'ı upsert et (varsa güncelle, yoksa oluştur)
-          if (body.event === 'page_view') {
-            console.log('🔄 UPSERTING SESSION:', sessionId);
-            
-            const { error: sessionError } = await supabase
-              .from('sessions')
-              .upsert({
-                id: sessionId, // session_id'yi id olarak kullan
-                shop_id: shopId,
-                session_id: sessionId,
-                ip_address: ip,
-                user_agent: ua,
-                first_seen: new Date().toISOString(),
-                last_seen: new Date().toISOString()
-              }, { 
-                onConflict: 'id',
-                ignoreDuplicates: false 
-              });
-            
-            if (sessionError) {
-              fastify.log.error({ err: sessionError }, 'Supabase session upsert error (app-proxy)');
-            } else {
-              console.log('✅ SESSION UPSERTED SUCCESSFULLY:', sessionId);
-            }
+          // Session'ı upsert et - her event'te session'ı güncelle
+          console.log('🔄 UPSERTING SESSION (Supabase):', sessionId);
+          
+          const { error: sessionError } = await supabase
+            .from('sessions')
+            .upsert({
+              id: sessionId, // session_id'yi id olarak kullan
+              shop_id: shopId,
+              session_id: sessionId,
+              ip_address: ip,
+              user_agent: ua,
+              first_seen: new Date().toISOString(),
+              last_seen: new Date().toISOString()
+            }, { 
+              onConflict: 'id',
+              ignoreDuplicates: false 
+            });
+          
+          if (sessionError) {
+            fastify.log.error({ err: sessionError }, 'Supabase session upsert error (app-proxy)');
+          } else {
+            console.log('✅ SESSION UPSERTED SUCCESSFULLY (Supabase):', sessionId);
           }
 
           // Insert event
@@ -1323,17 +1321,20 @@ async function bootstrap(): Promise<void> {
         );
         const shopId: string = shopRes.rows[0].id;
 
-        // sessions upsert - sadece page_view event'inde
-        if (body.event === 'page_view') {
-          const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
-          const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
-          const ua = (req.headers['user-agent'] as string) || null;
-          const ref = body.page?.ref || null;
-          await pool.query(
-            'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
-            [body.session_id, shopId, ip, ua, ref]
-          );
-        }
+        // sessions upsert - her event'te session'ı güncelle
+        const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
+        const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
+        const ua = (req.headers['user-agent'] as string) || null;
+        const ref = body.page?.ref || null;
+        
+        console.log('🔄 UPSERTING SESSION (PostgreSQL):', body.session_id);
+        
+        await pool.query(
+          'insert into sessions(id, shop_id, first_seen, last_seen, ip, ua, referrer) values ($1,$2,now(),now(),$3,$4,$5) on conflict(id) do update set last_seen=now(), ip=coalesce(excluded.ip, sessions.ip), ua=coalesce(excluded.ua, sessions.ua), referrer=coalesce(excluded.referrer, sessions.referrer)',
+          [body.session_id, shopId, ip, ua, ref]
+        );
+        
+        console.log('✅ SESSION UPSERTED SUCCESSFULLY (PostgreSQL):', body.session_id);
 
         // events insert
         const tsMs = body.ts ?? Date.now();
