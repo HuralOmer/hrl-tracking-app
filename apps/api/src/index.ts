@@ -13,7 +13,7 @@ async function bootstrap(): Promise<void> {
   await fastify.register(cors, {
     origin: '*',
     methods: ['GET', 'POST'],
-    allowedHeaders: ['*'],
+    allowedHeaders: ['content-type', 'x-tracking-key'],
   });
 
   // WebSocket support
@@ -30,7 +30,7 @@ async function bootstrap(): Promise<void> {
   
   // Supabase client
   const supabaseUrl = process.env.SUPABASE_URL || '';
-  const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
   const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
   // Redis configuration
@@ -55,16 +55,18 @@ async function bootstrap(): Promise<void> {
       )
       .subscribe();
     
-    // Subscribe to users table changes
-    supabase
-      .channel('users_changes')
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'users' },
-        (payload) => {
-          fastify.log.info({ payload }, 'User updated via real-time');
-        }
-      )
-      .subscribe();
+    // Subscribe to sessions table changes (optional - controlled by env flag)
+    if (process.env.REALTIME === '1') {
+      supabase
+        .channel('sessions_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'sessions' },
+          (payload) => {
+            fastify.log.info({ payload }, 'Session change via real-time');
+          }
+        )
+        .subscribe();
+    }
   }
   
   if ((redis as any)?.on) {
@@ -91,49 +93,85 @@ async function bootstrap(): Promise<void> {
   let isLeaderTab = false;
   let leaderTabId = null;
   let heartbeatInterval = null;
+  let leaderTimestampInterval = null;
   
   // Activity tracking
   let lastActivityTime = Date.now();
   let activityTimeout = null;
   const INACTIVITY_TIMEOUT = 4 * 60 * 1000; // 4 dakika
   
-  // Generate session ID (UUID format)
-  function generateSessionId() {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      const r = Math.random() * 16 | 0;
-      const v = c == 'x' ? r : (r & 0x3 | 0x8);
+  // ==== Konfig ====
+  const COLLECT_URL = 'https://hrl-tracking-app-production.up.railway.app/app-proxy/collect';
+  const MAX_SESSION_GAP_MS = 30 * 60 * 1000;          // 30 dk inactivity = yeni session
+  const HEARTBEAT_MS = 15000;                         // mevcut nabız süren
+
+  // ==== Yardımcılar ====
+  function uuidV4Fallback(){
+    // xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random()*16|0, v = c === 'x' ? r : (r&0x3|0x8);
       return v.toString(16);
     });
   }
+  function uuid() {
+    const w = (typeof window !== 'undefined') ? window : {};
+    const hasUUID = w.crypto && typeof w.crypto.randomUUID === 'function';
+    return hasUUID ? w.crypto.randomUUID() : uuidV4Fallback();
+  }
 
-  // Validate UUID format
-  function isValidUUID(uuid) {
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    return uuidRegex.test(uuid);
+  // Ziyaretçi kimliği (1 yıl)
+  function getOrSetVisitorId(){
+    const KEY = 'hrl_vid';
+    let vid = localStorage.getItem(KEY);
+    if (!vid) { vid = uuid(); localStorage.setItem(KEY, vid); }
+    return vid;
   }
-  
-  // Get or create session ID - Her ziyarette yeni session oluştur
-  function getSessionId() {
-    // Base session ID'yi localStorage'dan al veya oluştur
-    let baseSessionId = localStorage.getItem('ecomxtrade_session_id');
-    if (!baseSessionId || !isValidUUID(baseSessionId)) {
-      baseSessionId = generateSessionId();
-      localStorage.setItem('ecomxtrade_session_id', baseSessionId);
+
+  // Oturum bilgisi (tab/ziyaret bazlı) — sessionStorage + last_seen backup'ı localStorage'ta tut
+  function getSessionState(){
+    const SKEY = 'hrl_session';
+    const LKEY = 'hrl_last_seen';
+    let s = null;
+    try { s = JSON.parse(sessionStorage.getItem(SKEY)); } catch {}
+    const lastSeen = Number(localStorage.getItem(LKEY) || 0);
+    return { s, lastSeen, SKEY, LKEY };
+  }
+
+  function rotateIfNeeded(){
+    const { s, lastSeen, SKEY, LKEY } = getSessionState();
+    const now = Date.now();
+
+    // İlk açılış veya tarayıcı kapanmış → sessionStorage yok → yeni oturum
+    if (!s) {
+      const newS = { id: uuid(), started_at: now, last_seen: now };
+      sessionStorage.setItem(SKEY, JSON.stringify(newS));
+      localStorage.setItem(LKEY, String(now));
+      return newS;
     }
-    
-    // Visit number'ı localStorage'dan al ve artır
-    let visitNo = parseInt(localStorage.getItem('ecomxtrade_visit_no') || '0') + 1;
-    localStorage.setItem('ecomxtrade_visit_no', visitNo.toString());
-    
-    // Benzersiz session ID oluştur: baseSessionId + visitNo
-    const sessionId = baseSessionId + '-v' + visitNo;
-    
-    console.log('🆕🆕🆕 NEW VISIT SESSION v2.1:', sessionId);
-    console.log('🆕🆕🆕 VISIT NUMBER:', visitNo);
-    console.log('🆕🆕🆕 TIMESTAMP:', new Date().toISOString());
-    
-    return sessionId;
+
+    // inactivity kontrolü (tarayıcı açık kalsa da)
+    if ((now - (s.last_seen || lastSeen || s.started_at)) > MAX_SESSION_GAP_MS) {
+      const newS = { id: uuid(), started_at: now, last_seen: now };
+      sessionStorage.setItem(SKEY, JSON.stringify(newS));
+      localStorage.setItem(LKEY, String(now));
+      return newS;
+    }
+
+    // mevcut oturumu sürdür
+    return s;
   }
+
+  function touchSession(){
+    const { s, SKEY, LKEY } = getSessionState();
+    if (!s) return;
+    s.last_seen = Date.now();
+    sessionStorage.setItem(SKEY, JSON.stringify(s));
+    localStorage.setItem(LKEY, String(s.last_seen));
+  }
+
+  // ==== Başlangıç: session belirle ====
+  const VISITOR_ID = getOrSetVisitorId();
+  let SESSION = rotateIfNeeded();
 
   // Leader tab management
   function initializeLeaderTab() {
@@ -150,18 +188,34 @@ async function bootstrap(): Promise<void> {
       localStorage.setItem('ecomxtrade_leader_timestamp', now.toString());
       isLeaderTab = true;
       leaderTabId = tabId;
+      // eski interval varsa temizle
+      if (leaderTimestampInterval) { clearInterval(leaderTimestampInterval); }
+      // her 10 saniyede bir timestamp güncelle
+      leaderTimestampInterval = setInterval(() => {
+        localStorage.setItem('ecomxtrade_leader_timestamp', Date.now().toString());
+      }, 10000);
+      startPresenceLoop();
       console.log('Became leader tab:', tabId);
     } else {
       isLeaderTab = false;
       leaderTabId = existingLeader;
       console.log('Following leader tab:', existingLeader);
     }
-    
-    // Update leader timestamp every 10 seconds
-    if (isLeaderTab) {
-      setInterval(() => {
-        localStorage.setItem('ecomxtrade_leader_timestamp', Date.now().toString());
-      }, 10000);
+  }
+
+  // Presence loop management
+  function startPresenceLoop() {
+    if (heartbeatInterval) return;
+    heartbeatInterval = setInterval(() => {
+      checkLeaderStatus();
+      sendPresenceHeartbeat();
+    }, 5000);
+  }
+  
+  function stopPresenceLoop() {
+    if (heartbeatInterval) { 
+      clearInterval(heartbeatInterval); 
+      heartbeatInterval = null; 
     }
   }
 
@@ -177,6 +231,8 @@ async function bootstrap(): Promise<void> {
     } else if (isLeaderTab && currentLeader !== leaderTabId) {
       // Lost leadership
       isLeaderTab = false;
+      if (leaderTimestampInterval) { clearInterval(leaderTimestampInterval); leaderTimestampInterval = null; }
+      stopPresenceLoop();
       console.log('Lost leadership to:', currentLeader);
     } else if (!isLeaderTab && (!currentLeader || (now - parseInt(leaderTimestamp)) > 30000)) {
       // Leader is inactive, become new leader
@@ -187,6 +243,23 @@ async function bootstrap(): Promise<void> {
   // Activity detection - kullanıcı aktif mi?
   function updateActivity() {
     lastActivityTime = Date.now();
+    
+    // Eğer interval durduysa ve bu sekme liderse tekrar başlat
+    if (!heartbeatInterval && isLeaderTab) {
+      startPresenceLoop();
+    }
+    
+    // Visit heartbeat interval'ı da yeniden başlat (eğer durduysa)
+    if (!visitHeartbeatInterval) {
+      visitHeartbeatInterval = setInterval(() => {
+        // Sadece aktif kullanıcı için heartbeat gönder
+        const now = Date.now();
+        if (now - lastActivityTime <= INACTIVITY_TIMEOUT) {
+          touchSession();
+          send('visit_heartbeat');
+        }
+      }, HEARTBEAT_MS);
+    }
     
     // Clear existing timeout
     if (activityTimeout) {
@@ -199,6 +272,10 @@ async function bootstrap(): Promise<void> {
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
         heartbeatInterval = null;
+      }
+      if (visitHeartbeatInterval) {
+        clearInterval(visitHeartbeatInterval);
+        visitHeartbeatInterval = null;
       }
     }, INACTIVITY_TIMEOUT);
   }
@@ -236,7 +313,7 @@ async function bootstrap(): Promise<void> {
       return;
     }
     
-    const sessionId = getSessionId();
+    const sessionId = SESSION.id;  // ✅ Hatalı referans düzeltildi
     const heartbeatData = {
       shop: SHOP_DOMAIN,
       session_id: sessionId,
@@ -253,84 +330,105 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  // Track event - Hibrit sistem
-  function trackEvent(eventName, payload = {}) {
-    const sessionId = getSessionId();
-    const eventData = {
-      event: eventName,
+  // ==== Event gönderen yardımcı ====
+  function send(evtName, extra={}){
+    const payload = {
+      event: evtName,
+      session_id: SESSION.id,
+      visitor_id: VISITOR_ID,
       ts: Date.now(),
-      session_id: sessionId,
-      shop_domain: SHOP_DOMAIN,
-      page: {
-        path: window.location.pathname,
-        title: document.title,
-        ref: document.referrer
-      },
-      payload: payload,
-      event_id: 'event_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+      page: { path: location.pathname, title: document.title, ref: document.referrer },
+      shop_domain: SHOP_DOMAIN,   // ✅ Zorunlu alanı ekle
+      ...extra
     };
-    
-    console.log('📤 SENDING EVENT v2.1:', {
-      event: eventName,
-      sessionId: sessionId,
-      timestamp: new Date().toISOString()
-    });
-    
-    // Critical event'ler için sendBeacon kullan (tarayıcı kapanırken çalışır)
-    const criticalEvents = ['page_view', 'beforeunload', 'unload'];
-    
-    if (criticalEvents.includes(eventName) && navigator.sendBeacon) {
-      // sendBeacon kullan - daha güvenilir ama debug zor
-      const success = navigator.sendBeacon(
-        \`\${TRACKING_URL}/app-proxy/collect\`,
-        JSON.stringify(eventData)
-      );
-      
-      if (!success) {
-        console.warn('sendBeacon failed, falling back to fetch');
-        // Fallback to fetch
-        fetch(\`\${TRACKING_URL}/app-proxy/collect\`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(eventData)
-        }).catch(err => console.error('Event tracking failed:', err.message));
-      }
-    } else {
-      // Normal event'ler için fetch kullan - debug kolay
-      fetch(\`\${TRACKING_URL}/app-proxy/collect\`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(eventData)
-      }).catch(err => {
-        console.error('Event tracking failed:', err.message);
-      });
-    }
+    // preflight kaçınmak için text/plain; server tarafı kabul etmeli
+    return fetch(COLLECT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'text/plain;charset=UTF-8'},
+      body: JSON.stringify(payload),
+      keepalive: true
+    }).catch(()=>{});
   }
+  
+  // Basit bir sarmalayıcı ekleyelim ki beforeunload/unload çağrıları hata vermesin
+  function trackEvent(name, extra){ return send(name, extra); }
+
+  // ==== Oturum başlangıcını işaretle (raporlamaya yardımcı) ====
+  send('session_start');
+
+  // ==== Heartbeat ====
+  let visitHeartbeatInterval = null;
+  visitHeartbeatInterval = setInterval(() => {
+    // Sadece aktif kullanıcı için heartbeat gönder
+    const now = Date.now();
+    if (now - lastActivityTime <= INACTIVITY_TIMEOUT) {
+      touchSession();
+      send('visit_heartbeat');
+    }
+  }, HEARTBEAT_MS);
+
+  // ==== Çıkış anı hibrit (sendBeacon + fetch keepalive) ====
+  function exitPing(){
+    const payloadObj = {
+      event: 'visit_heartbeat',
+      final: true,
+      session_id: SESSION.id,
+      visitor_id: VISITOR_ID,
+      ts: Date.now(),
+      event_id: (crypto.randomUUID ? crypto.randomUUID() : uuid()),
+      page: { path: location.pathname, title: document.title, ref: document.referrer },
+      shop_domain: SHOP_DOMAIN   // ✅ Zorunlu alanı ekle
+    };
+    const payload = JSON.stringify(payloadObj);
+
+    try {
+      if (navigator.sendBeacon) {
+        const blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon(COLLECT_URL, blob);
+      }
+    } catch {}
+
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(), 1500);
+      fetch(COLLECT_URL, {
+        method: 'POST',
+        headers: {'Content-Type':'text/plain;charset=UTF-8'},
+        body: payload,
+        keepalive: true,
+        signal: ctrl.signal
+      }).catch(()=>{}).finally(()=>clearTimeout(t));
+    } catch {}
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') exitPing();
+  });
+  window.addEventListener('pagehide', (e) => { if (!e.persisted) exitPing(); });
   
   // Track page view
   function trackPageView() {
     console.log('📄📄📄 TRACKING PAGE VIEW v2.1');
     console.log('📄📄📄 URL:', window.location.href);
-    trackEvent('page_view');
+    send('page_view');
   }
   
   // Track add to cart
   function trackAddToCart(productId, variantId, quantity = 1) {
-    trackEvent('add_to_cart', {
+    send('add_to_cart', {
       product_id: productId,
       variant_id: variantId,
       quantity: quantity
     });
   }
-  
+
   // Track checkout started
   function trackCheckoutStarted() {
-    trackEvent('checkout_started');
+    send('checkout_started');
   }
-  
+
   // Track purchase
   function trackPurchase(orderId, total, currency) {
-    trackEvent('purchase', {
+    send('purchase', {
       order_id: orderId,
       total: total,
       currency: currency
@@ -351,14 +449,27 @@ async function bootstrap(): Promise<void> {
     // Send initial presence heartbeat (only if leader)
     sendPresenceHeartbeat();
     
-    // Start presence heartbeat (5 saniyede bir) - only leader tab
-    heartbeatInterval = setInterval(() => {
-      checkLeaderStatus();
-      sendPresenceHeartbeat();
-    }, 5000);
+    // Start presence heartbeat (5 saniyede bir) - only if leader tab
+    if (isLeaderTab) startPresenceLoop();
     
     // Track page changes (SPA support)
     let lastUrl = window.location.href;
+    
+    // History API hook'ları (SPA'lar için daha garantili)
+    (function() {
+      const push = history.pushState;
+      history.pushState = function() { 
+        push.apply(this, arguments); 
+        window.dispatchEvent(new Event('spa:navigate')); 
+      }
+      window.addEventListener('popstate', () => window.dispatchEvent(new Event('spa:navigate')));
+      window.addEventListener('spa:navigate', () => { 
+        trackPageView(); 
+        sendPresenceHeartbeat(); 
+      });
+    })();
+    
+    // MutationObserver (fallback)
     new MutationObserver(() => {
       const url = window.location.href;
       if (url !== lastUrl) {
@@ -367,7 +478,7 @@ async function bootstrap(): Promise<void> {
         // Page değiştiğinde de heartbeat gönder
         sendPresenceHeartbeat();
       }
-    }).observe(document, { subtree: true, childList: true });
+    }).observe(document.body || document, { subtree: true, childList: true });
     
     // Track add to cart events
     document.addEventListener('click', function(e) {
@@ -418,6 +529,11 @@ async function bootstrap(): Promise<void> {
       if (activityTimeout) {
         clearTimeout(activityTimeout);
         activityTimeout = null;
+      }
+      // Clear leader timestamp interval
+      if (leaderTimestampInterval) {
+        clearInterval(leaderTimestampInterval);
+        leaderTimestampInterval = null;
       }
       trackEvent('unload');
     });
@@ -480,37 +596,72 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours (using sessions table)
-        const { data: sessionData, error: sessionError } = await supabase
-          .from('sessions')
+        const shopDomain = 'ecomxtrade.myshopify.com'; // Default shop for demo
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        
+        // Get shop ID first
+        const { data: shopData, error: shopError } = await supabase
+          .from('shops')
           .select('id')
-          .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .eq('domain', shopDomain)
+          .single();
+        
+        if (shopError || !shopData) {
+          fastify.log.error({ err: shopError }, 'Shop not found in dashboard API');
+          return reply.send({
+            activeUsers: 0,
+            totalSessions: 0,
+            pageViews: 0,
+            conversionRate: 0,
+            timestamp: new Date().toISOString(),
+            error: 'shop_not_found'
+          });
+        }
+        
+        const shopId = shopData.id;
+
+        // Get total sessions from last 24 hours (using sessions table)
+        const { data: sessionData, count: sessionCount, error: sessionError } = await supabase
+          .from('sessions')
+          .select('id', { count: 'exact', head: true })  // sadece say
+          .eq('shop_id', shopId)
+          .gte('first_seen', twentyFourHoursAgo);
         
         if (!sessionError) {
-          totalSessions = sessionData?.length || 0;
+          totalSessions = sessionCount || 0;
         }
 
-        // Get page views from last 24 hours (using page_views table)
-        const { data: pageViewData, error: pageViewError } = await supabase
+        // Get page views from last 24 hours (using page_views table) - FIXED FIELD NAMES
+        const { count: pageViewCount, error: pageViewError } = await supabase
           .from('page_views')
-          .select('id')
-          .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+          .select('id', { count: 'exact', head: true })  // sadece say
+          .eq('shop_id', shopId)
+          .gte('ts', twentyFourHoursAgo);  // ✅ viewed_at → ts
         
         if (!pageViewError) {
-          pageViews = pageViewData?.length || 0;
+          pageViews = pageViewCount || 0;
         }
 
-        // Get conversions from last 24 hours (using events table)
-        const { data: conversionData, error: conversionError } = await supabase
+        // Get conversions from last 24 hours (using events table) - FIXED FIELD NAMES
+        const { count: conversions, error: conversionError } = await supabase
           .from('events')
-          .select('id')
-          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-          .in('event_name', ['add_to_cart', 'checkout_started', 'purchase']);
+          .select('id', { count: 'exact', head: true })  // sadece say
+          .eq('shop_id', shopId)
+          .gte('ts', twentyFourHoursAgo)  // ✅ created_at → ts
+          .in('name', ['add_to_cart', 'checkout_started', 'purchase']);  // ✅ event_name → name
         
         if (!conversionError) {
-          const conversions = conversionData?.length || 0;
-          conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
+          conversionRate = totalSessions > 0 ? parseFloat((((conversions || 0) / totalSessions) * 100).toFixed(1)) : 0;
         }
+        
+        console.log('📊 API DASHBOARD STATS:', {
+          totalSessions,
+          pageViews,
+          conversionRate,
+          shopId,
+          shopDomain,
+          timeRange: '24 hours'
+        });
       } catch (err) {
         fastify.log.error({ err }, 'Supabase error in dashboard API');
         // Fallback to demo data
@@ -536,6 +687,12 @@ async function bootstrap(): Promise<void> {
 
   // Redis cleanup endpoint
   fastify.post('/cleanup', async (req: any, reply: any) => {
+    // Auth kontrolü
+    const trackingKey = req.headers['x-tracking-key'] as string;
+    if (!process.env.TRACKING_KEY || trackingKey !== process.env.TRACKING_KEY) {
+      return reply.code(401).send({ ok: false, error: 'unauthorized' });
+    }
+
     if (!redis) {
       return reply.send({ ok: true, note: 'no_redis' });
     }
@@ -563,6 +720,7 @@ async function bootstrap(): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
     let activeUsers = 0;
     let totalSessions = 0;
+    let uniqueVisitors = 0;
     let pageViews = 0;
     let conversionRate = 0;
 
@@ -587,47 +745,114 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        // Get total sessions from last 24 hours (using sessions table)
-        const { data: sessionData, error: sessionError } = await supabase
-          .from('sessions')
-          .select('id')
-          .gte('first_seen', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+        const shopDomain = 'ecomxtrade.myshopify.com';
+        const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         
-        if (!sessionError) {
-          totalSessions = sessionData?.length || 0;
-        }
+        // Get shop PK first
+        const { data: shopRow, error: shopFindErr } = await supabase
+          .from('shops').select('id').eq('domain', shopDomain).single();
+        const shopPk = shopRow?.id;
+        
+        if (!shopPk) {
+          fastify.log.warn('Shop not found, using demo data');
+          // Fallback to demo data
+          totalSessions = Math.floor(Math.random() * 500) + 100;
+          uniqueVisitors = Math.floor(totalSessions * 0.7);
+          pageViews = Math.floor(Math.random() * 2000) + 500;
+          conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
+        } else {
+          // Total Sessions: COUNT(*) FROM sessions WHERE shop_id = :shopPk AND first_seen >= now() - interval '24 hours'
+          const { count: sessionCount, error: sessionError } = await supabase
+            .from('sessions')
+            .select('id', { count: 'exact', head: true })  // sadece say
+            .eq('shop_id', shopPk)
+            .gte('first_seen', twentyFourHoursAgo);
+          
+          if (!sessionError) {
+            totalSessions = sessionCount || 0;
+          }
 
-        // Get page views from last 24 hours (using page_views table)
-        const { data: pageViewData, error: pageViewError } = await supabase
-          .from('page_views')
-          .select('id')
-          .gte('viewed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-        
-        if (!pageViewError) {
-          pageViews = pageViewData?.length || 0;
-        }
+          // Unique Visitors: COUNT(DISTINCT visitor_id) FROM sessions WHERE shop_id = :shopPk AND first_seen >= now() - interval '24 hours'
+          // Büyük hacimde doğru sayım için view kullan (eğer yoksa fallback)
+          try {
+            const { data: uniqueVisitorData, error: uniqueVisitorError } = await supabase
+              .from('v_sessions_unique_visitors_24h')
+              .select('unique_visitors')
+              .eq('shop_id', shopPk)
+              .maybeSingle();
+            
+            if (!uniqueVisitorError && uniqueVisitorData) {
+              uniqueVisitors = uniqueVisitorData.unique_visitors ?? 0;
+            } else {
+              // Fallback: Eski yöntem (küçük hacimde)
+              const { data: fallbackData } = await supabase
+                .from('sessions')
+                .select('visitor_id')
+                .eq('shop_id', shopPk)
+                .gte('first_seen', twentyFourHoursAgo)
+                .not('visitor_id', 'is', null);
+              
+              const uniqueVisitorIds = new Set(fallbackData?.map(s => s.visitor_id) || []);
+              uniqueVisitors = uniqueVisitorIds.size;
+            }
+          } catch (err) {
+            // View yoksa fallback kullan
+            const { data: fallbackData } = await supabase
+              .from('sessions')
+              .select('visitor_id')
+              .eq('shop_id', shopPk)
+              .gte('first_seen', twentyFourHoursAgo)
+              .not('visitor_id', 'is', null);
+            
+            const uniqueVisitorIds = new Set(fallbackData?.map(s => s.visitor_id) || []);
+            uniqueVisitors = uniqueVisitorIds.size;
+          }
 
-        // Get conversions from last 24 hours (using events table)
-        const { data: conversionData, error: conversionError } = await supabase
-          .from('events')
-          .select('id')
-          .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-          .in('event_name', ['add_to_cart', 'checkout_started', 'purchase']);
-        
-        if (!conversionError) {
-          const conversions = conversionData?.length || 0;
-          conversionRate = totalSessions > 0 ? parseFloat(((conversions / totalSessions) * 100).toFixed(1)) : 0;
+          // Page Views: COUNT(*) FROM page_views WHERE shop_id = :shopPk AND ts >= now() - interval '24 hours'
+          const { count: pageViewCount, error: pageViewError } = await supabase
+            .from('page_views')
+            .select('id', { count: 'exact', head: true })  // sadece say
+            .eq('shop_id', shopPk)
+            .gte('ts', twentyFourHoursAgo);
+          
+          if (!pageViewError) {
+            pageViews = pageViewCount || 0;
+          }
+
+          // Conversion Rate: Events / Sessions (with proper session filtering)
+          const { count: conversions, error: conversionError } = await supabase
+            .from('events')
+            .select('id', { count: 'exact', head: true })  // sadece say
+            .eq('shop_id', shopPk)
+            .gte('ts', twentyFourHoursAgo)
+            .in('name', ['add_to_cart', 'checkout_started', 'purchase']);
+          
+          if (!conversionError) {
+            conversionRate = totalSessions > 0 ? parseFloat((((conversions || 0) / totalSessions) * 100).toFixed(1)) : 0;
+          }
         }
+        
+        console.log('📊 DASHBOARD STATS:', {
+          totalSessions,
+          uniqueVisitors,
+          pageViews,
+          conversionRate,
+          shopPk,
+          shopDomain,
+          timeRange: '24 hours'
+        });
       } catch (err) {
         fastify.log.error({ err }, 'Supabase error in dashboard stats');
         // Fallback to demo data
         totalSessions = Math.floor(Math.random() * 500) + 100;
+        uniqueVisitors = Math.floor(totalSessions * 0.7); // Genelde unique visitors sessions'dan az
         pageViews = Math.floor(Math.random() * 2000) + 500;
         conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
       }
     } else {
       // Demo data when no database
       totalSessions = Math.floor(Math.random() * 500) + 100;
+      uniqueVisitors = Math.floor(totalSessions * 0.7); // Genelde unique visitors sessions'dan az
       pageViews = Math.floor(Math.random() * 2000) + 500;
       conversionRate = parseFloat((Math.random() * 5 + 1).toFixed(1));
     }
@@ -686,6 +911,11 @@ async function bootstrap(): Promise<void> {
               <div class="stat-value" id="totalSessions">${totalSessions}</div>
               <div class="stat-label">Total Sessions (24h)</div>
               <div class="stat-change" id="totalSessionsChange">Last 24 hours</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="uniqueVisitors">${uniqueVisitors}</div>
+              <div class="stat-label">Unique Visitors (24h)</div>
+              <div class="stat-change" id="uniqueVisitorsChange">Last 24 hours</div>
             </div>
             <div class="stat-card">
               <div class="stat-value" id="pageViews">${pageViews}</div>
@@ -805,7 +1035,7 @@ async function bootstrap(): Promise<void> {
             <div class="endpoint">POST /collect - Collect tracking data</div>
             <div class="endpoint">POST /presence/beat - Presence heartbeat</div>
             <div class="endpoint">GET /presence/stream - Presence stream (SSE)</div>
-            <div class="endpoint">GET /ws - WebSocket real-time updates</div>
+            <!-- WS disabled for now -->
             <div class="endpoint">GET /app-proxy/presence - App proxy presence</div>
             <div class="endpoint">POST /app-proxy/collect - App proxy collect</div>
           </div>
@@ -845,7 +1075,9 @@ async function bootstrap(): Promise<void> {
   fastify.get('/presence/stream', async (req: any, reply: any) => {
     const q = (req.query as any) as Record<string, string>;
     const shop = q.shop as string;
+    if (!shop) return reply.code(400).send({ ok: false, error: 'shop_required' });
 
+    reply.hijack();
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');
@@ -873,7 +1105,9 @@ async function bootstrap(): Promise<void> {
       }
     }, 2000);
 
-    (req.raw as any).on('close', () => clearInterval(interval));
+    const stop = () => clearInterval(interval);
+    (req.raw as any).on('close', stop);
+    (req.raw as any).on('error', stop);
   });
 
   // WebSocket endpoint removed for now - focus on session tracking
@@ -977,20 +1211,24 @@ async function bootstrap(): Promise<void> {
   });
   */
 
-  // Collect endpoint
+  // Collect endpoint - app-proxy/collect ile tutarlı
   fastify.post('/collect', async (req: any, reply: any) => {
-    const body = z.object({
+    const schema = z.object({
       event: z.string(),
       ts: z.number().optional(),
       session_id: z.string(),
+      visitor_id: z.string().optional(), // app-proxy ile tutarlı
       shop_domain: z.string(),
       page: z
         .object({ path: z.string().optional(), title: z.string().optional(), ref: z.string().optional() })
         .optional(),
-      duration_ms: z.number().optional(),
+      duration_ms: z.number().min(0).optional(),
       payload: z.any().optional(),
       event_id: z.string().optional(),
-    }).parse(req.body);
+    });
+    const body = typeof req.body === 'string'
+      ? schema.parse(JSON.parse(req.body))
+      : schema.parse(req.body);
 
     if (supabase) {
       try {
@@ -1007,58 +1245,67 @@ async function bootstrap(): Promise<void> {
         }
         
         const shopId = shopData.id;
-
-        // Her girişte tamamen yeni session oluştur
-        const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
-        const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
-        const ua = (req.headers['user-agent'] as string) || null;
-        const ref = body.page?.ref || null;
-        
-        // Client'tan gelen sabit session_id'yi kullan
         const sessionId = body.session_id;
-        
-        // Her girişte yeni session oluştur
-        const { error: sessionInsertErr } = await supabase
-          .from('sessions')
-          .insert({
-            id: crypto.randomUUID(),
-            shop_id: shopId,
-            session_id: sessionId,
-            ip_address: ip,
-            user_agent: ua,
-            first_seen: new Date().toISOString(),
-            last_seen: new Date().toISOString()
-          });
-        if (sessionInsertErr) fastify.log.error({ err: sessionInsertErr }, 'Supabase session insert error');
-
-        // Insert event
+        const visitorId = body.visitor_id || null;
         const tsMs = body.ts ?? Date.now();
-        const { error: eventError } = await supabase
-          .from('events')
-          .insert({
+
+        // 1) Güncelle (first_seen'e dokunma)
+        const { data: updated, error: updErr } = await supabase
+          .from('sessions')
+          .update({
+            last_seen: new Date(tsMs).toISOString(),
+            ip: (req.headers['x-forwarded-for'] || '').toString().split(',')[0] || req.ip || null,
+            ua: (req.headers['user-agent'] as string) || null,
+            referrer: body.page?.ref || null
+          })
+          .eq('id', sessionId)
+          .select('id')  // Supabase v2'de etkilenen satırı görmek için select gerekir
+          .maybeSingle();
+
+        if (!updated) {
+          // 2) Satır yoksa INSERT (first_seen burada set edilir)
+          const { error: insErr } = await supabase.from('sessions').insert({
+            id: sessionId,
             shop_id: shopId,
-            session_id: sessionId,
-            event_name: body.event,
-            created_at: new Date(tsMs).toISOString(),
-            event_data: body.payload ?? null
+            visitor_id: visitorId || null,
+            first_seen: new Date(tsMs).toISOString(),
+            last_seen: new Date(tsMs).toISOString(),
+            ip: (req.headers['x-forwarded-for'] || '').toString().split(',')[0] || req.ip || null,
+            ua: (req.headers['user-agent'] as string) || null,
+            referrer: body.page?.ref || null
           });
+          if (insErr) fastify.log.error({ insErr }, 'sessions insert failed');
+        }
+
+        // Events/Page views aynen (sadece foreign key doğru id)
+        // Event deduplikasyonu için upsert kullan (event_id varsa)
+        const eventData = {
+          shop_id: shopId,
+          session_id: sessionId,
+          name: body.event,                 // ✅
+          ts: new Date(tsMs).toISOString(), // ✅
+          page_path: body.page?.path || null,
+          payload: body.payload ?? null,
+          event_id: body.event_id || null
+        };
+        
+        const { error: eventError } = body.event_id 
+          ? await supabase.from('events').upsert(eventData, { onConflict: 'shop_id,event_id' })
+          : await supabase.from('events').insert(eventData);
         
         if (eventError) {
           fastify.log.error({ err: eventError }, 'Supabase event insert error');
         }
 
-        // Insert page view if it's a page_view event
         if (body.event === 'page_view') {
-          const { error: pageViewError } = await supabase
-            .from('page_views')
-            .insert({
-              shop_id: shopId,
-              session_id: sessionId,
-              url: body.page?.path || '/',
-              title: body.page?.title || '',
-              referrer: body.page?.ref || null,
-              viewed_at: new Date(tsMs).toISOString()
-            });
+          const { error: pageViewError } = await supabase.from('page_views').insert({
+            shop_id: shopId,
+            session_id: sessionId,
+            path: body.page?.path || '/',     // ✅
+            title: body.page?.title || '',
+            engaged_ms: body.duration_ms ? Math.max(0, Math.round(body.duration_ms)) : null,
+            ts: new Date(tsMs).toISOString()  // ✅
+          });
           
           if (pageViewError) {
             fastify.log.error({ err: pageViewError }, 'Supabase page view insert error');
@@ -1101,7 +1348,9 @@ async function bootstrap(): Promise<void> {
       }
 
       const payload = { current, display: current, ts: Date.now() };
-      const etag = 'W/"' + crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex') + '"';
+      // ETag'i ts olmadan hesapla (ts her istekte değişir, 304 asla dönmez)
+      const etagPayload = { current, display: current };
+      const etag = 'W/"' + crypto.createHash('sha1').update(JSON.stringify(etagPayload)).digest('hex') + '"';
       const inm = (req.headers['if-none-match'] as string) || '';
       if (inm && inm === etag) {
         return reply.code(304).send();
@@ -1119,22 +1368,30 @@ async function bootstrap(): Promise<void> {
   // App Proxy collect endpoint
   fastify.post('/app-proxy/collect', async (req: any, reply: any) => {
     try {
-      // Signature kontrolünü kaldırdık - tracking kodu için
+      // Auth kontrolü (opsiyonel - tracking için)
+      const trackingKey = req.headers['x-tracking-key'] as string;
+      if (trackingKey && (!process.env.TRACKING_KEY || trackingKey !== process.env.TRACKING_KEY)) {
+        return reply.code(401).send({ ok: false, error: 'unauthorized' });
+      }
 
-      const body = z.object({
+      const schema = z.object({
         event: z.string().min(1).max(100),
         ts: z.number().positive().optional(),
-        session_id: z.string().uuid(),
+        session_id: z.string().min(1).max(255), // UUID değil, herhangi bir string olabilir
+        visitor_id: z.string().min(1).max(255).optional(),
         shop_domain: z.string().min(1).max(255),
         page: z.object({ 
           path: z.string().max(1000).optional(), 
           title: z.string().max(500).optional(), 
           ref: z.string().max(1000).optional() 
         }).optional(),
-        duration_ms: z.number().positive().optional(),
+        duration_ms: z.number().min(0).optional(),
         payload: z.any().optional(),
         event_id: z.string().max(100).optional(),
-      }).parse(req.body);
+      });
+      const body = typeof req.body === 'string'
+        ? schema.parse(JSON.parse(req.body))
+        : schema.parse(req.body);
 
       // Debug: Supabase kullanımını kontrol et
       console.log('🔍 SUPABASE DEBUG:', {
@@ -1164,94 +1421,125 @@ async function bootstrap(): Promise<void> {
           
           const shopId = shopData.id;
 
-          // Her girişte tamamen yeni session oluştur
-          const ipHeader = (req.headers['x-forwarded-for'] as string) || '';
-          const ip = (ipHeader.split(',')[0] || req.ip || null) as any;
-          const ua = (req.headers['user-agent'] as string) || null;
-          const ref = body.page?.ref || null;
-          
-          // Session ID'yi client'tan al (localStorage'dan geliyor)
+          // Session ve visitor bilgilerini al
           const sessionId = body.session_id;
+          const visitorId = body.visitor_id || null;
+          const tsMs = body.ts ?? Date.now();
           
           console.log('🎯 COLLECT DEBUG:', {
             event: body.event,
             sessionId: sessionId,
+            visitorId: visitorId,
             shopId: shopId,
             timestamp: new Date().toISOString()
           });
           
-          // Session'ı upsert et - her event'te session'ı güncelle
-          console.log('🔄 UPSERTING SESSION (Supabase):', sessionId);
+          // Emniyet kemeri: Session rotation kontrolü
+          let finalSessionId = sessionId;
+          const MAX_SESSION_GAP_MS = 30 * 60 * 1000; // 30 dakika
           
-          // Önce mevcut session'ı kontrol et
-          const { data: existingSession } = await supabase
+          if (visitorId) {
+            // Aynı visitor_id ve shop_id için son session'ı kontrol et
+            const { data: lastSession } = await supabase
+              .from('sessions')
+              .select('id, last_seen')
+              .eq('visitor_id', visitorId)
+              .eq('shop_id', shopId)           // ✅ mağaza bağlamında sorgula
+              .order('last_seen', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            
+            if (lastSession && lastSession.id !== sessionId) {
+              const timeDiff = tsMs - new Date(lastSession.last_seen).getTime();
+              
+              // Eğer son session'dan 30 dakikadan fazla geçmişse ve farklı session_id geliyorsa
+              if (timeDiff > MAX_SESSION_GAP_MS) {
+                console.log('🛡️ EMNİYET KEMERİ: Session rotation gerekli', {
+                  lastSessionId: lastSession.id,
+                  currentSessionId: sessionId,
+                  visitorId: visitorId,
+                  shopId: shopId,
+                  timeDiff: timeDiff,
+                  timeDiffMinutes: Math.round(timeDiff / (1000 * 60))
+                });
+                
+                // Yeni session_id oluştur (client'ın gönderdiği session_id'yi kullan)
+                finalSessionId = sessionId;
+                console.log('✅ Yeni session kullanılıyor:', finalSessionId);
+              } else {
+                // Aynı session devam ediyor, mevcut session_id'yi kullan
+                finalSessionId = lastSession.id;
+                console.log('🔄 Mevcut session devam ediyor:', finalSessionId);
+              }
+            }
+          }
+          
+          // 1) Güncelle (first_seen'e dokunma)
+          console.log('🔄 UPDATING SESSION (Supabase):', finalSessionId);
+          
+          const { data: updated, error: updErr } = await supabase
             .from('sessions')
-            .select('id, first_seen')
-            .eq('id', sessionId)
-            .single();
-          
-          const now = new Date().toISOString();
-          const isNewSession = !existingSession;
-          
-          // Visit number'ı session_id'den çıkar
-          const visitNo = sessionId.includes('-v') ? parseInt(sessionId.split('-v')[1]) : 1;
-          
-          const { error: sessionError } = await supabase
-            .from('sessions')
-            .upsert({
-              id: sessionId, // session_id'yi id olarak kullan
+            .update({
+              last_seen: new Date(tsMs).toISOString(),
+              ip: (req.headers['x-forwarded-for'] || '').toString().split(',')[0] || req.ip || null,
+              ua: (req.headers['user-agent'] as string) || null,
+              referrer: body.page?.ref || null
+            })
+            .eq('id', finalSessionId)
+            .select('id')  // Supabase v2'de etkilenen satırı görmek için select gerekir
+            .maybeSingle();
+
+          if (!updated) {
+            // 2) Satır yoksa INSERT (first_seen burada set edilir)
+            console.log('🆕 INSERTING NEW SESSION (Supabase):', finalSessionId);
+            const { error: insErr } = await supabase.from('sessions').insert({
+              id: finalSessionId,
               shop_id: shopId,
-              session_id: sessionId,
-              ip_address: ip,
-              user_agent: ua,
-              first_seen: isNewSession ? now : existingSession?.first_seen || now,
-              last_seen: now,
-              visit_no: visitNo
-            }, { 
-              onConflict: 'id',
-              ignoreDuplicates: false 
+              visitor_id: visitorId || null,
+              first_seen: new Date(tsMs).toISOString(),
+              last_seen: new Date(tsMs).toISOString(),
+              ip: (req.headers['x-forwarded-for'] || '').toString().split(',')[0] || req.ip || null,
+              ua: (req.headers['user-agent'] as string) || null,
+              referrer: body.page?.ref || null
             });
-          
-          if (sessionError) {
-            fastify.log.error({ err: sessionError }, 'Supabase session upsert error (app-proxy)');
+            if (insErr) {
+              fastify.log.error({ insErr }, 'sessions insert failed (app-proxy)');
+            } else {
+              console.log(`✅ SESSION INSERTED SUCCESSFULLY (Supabase): ${finalSessionId}`);
+            }
           } else {
-            console.log(`✅ SESSION UPSERTED SUCCESSFULLY (Supabase): ${sessionId} - ${isNewSession ? 'NEW' : 'EXISTING'}`);
+            console.log(`✅ SESSION UPDATED SUCCESSFULLY (Supabase): ${finalSessionId}`);
           }
 
-          // Insert event
-          const tsMs = body.ts ?? Date.now();
-          const { error: eventError } = await supabase
-            .from('events')
-            .insert({
-              shop_id: shopId,
-              session_id: sessionId,
-              event_name: body.event,
-              created_at: new Date(tsMs).toISOString(),
-              event_data: body.payload ?? null
-            });
+          // Events/Page views aynen (sadece foreign key doğru id)
+          // Event deduplikasyonu için upsert kullan (event_id varsa)
+          const eventData = {
+            shop_id: shopId,
+            session_id: finalSessionId,  // emniyet kemeri sonrası final session_id
+            name: body.event,
+            ts: new Date(tsMs).toISOString(),
+            page_path: body.page?.path || null,
+            payload: body.payload ?? null,
+            event_id: body.event_id || null
+          };
+          
+          const { error: eventError } = body.event_id 
+            ? await supabase.from('events').upsert(eventData, { onConflict: 'shop_id,event_id' })
+            : await supabase.from('events').insert(eventData);
           
           if (eventError) {
             fastify.log.error({ err: eventError }, 'Supabase event insert error (app-proxy)');
           }
 
-          // Insert page view if it's a page_view event
           if (body.event === 'page_view') {
-            console.log('📄 INSERTING PAGE VIEW:', {
-              sessionId: sessionId,
-              url: body.page?.path || '/',
-              title: body.page?.title || ''
+            const { error: pageViewError } = await supabase.from('page_views').insert({
+              shop_id: shopId,
+              session_id: finalSessionId,  // emniyet kemeri sonrası final session_id
+              path: body.page?.path || '/',
+              title: body.page?.title || '',
+              engaged_ms: body.duration_ms ? Math.max(0, Math.round(body.duration_ms)) : null,
+              ts: new Date(tsMs).toISOString()
             });
-            
-            const { error: pageViewError } = await supabase
-              .from('page_views')
-              .insert({
-                shop_id: shopId,
-                session_id: sessionId,
-                url: body.page?.path || '/',
-                title: body.page?.title || '',
-                referrer: body.page?.ref || null,
-                viewed_at: new Date(tsMs).toISOString()
-              });
             
             if (pageViewError) {
               fastify.log.error({ err: pageViewError }, 'Supabase page view insert error (app-proxy)');
