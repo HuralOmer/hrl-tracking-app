@@ -8,7 +8,31 @@ import { Redis as UpstashRedis } from '@upstash/redis';
 import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
+// Environment validation schema
+const envSchema = z.object({
+  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  SUPABASE_ANON_KEY: z.string().optional(),
+  REDIS_URL: z.string().optional(),
+  UPSTASH_REDIS_REST_URL: z.string().url().optional(),
+  UPSTASH_REDIS_REST_TOKEN: z.string().optional(),
+  PUBLIC_BASE_URL: z.string().url().optional(),
+  SHOP_DOMAIN: z.string().optional(),
+  TRACKING_KEY: z.string().optional(),
+  REALTIME: z.enum(['0', '1']).optional(),
+  PORT: z.string().optional(),
+  NODE_ENV: z.string().optional(),
+});
+
 async function bootstrap(): Promise<void> {
+  // Validate environment variables
+  try {
+    envSchema.parse(process.env);
+  } catch (error) {
+    console.error('❌ Environment validation failed:', error);
+    process.exit(1);
+  }
+
   const fastify = Fastify({ logger: true });
   await fastify.register(cors, {
     origin: '*',
@@ -33,9 +57,21 @@ async function bootstrap(): Promise<void> {
   const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
   const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
+  // App configuration
+  const publicBaseUrl = process.env.PUBLIC_BASE_URL || 'https://hrl-tracking-app-production.up.railway.app';
+  const DEFAULT_SHOP = process.env.SHOP_DOMAIN || 'ecomxtrade.myshopify.com';
+
   // Redis configuration
-  const redisUrl = process.env.REDIS_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const useRest = !!process.env.UPSTASH_REDIS_REST_URL;
+  const hasRedisUrl = !!process.env.REDIS_URL;
+  const hasUpstashUrl = !!process.env.UPSTASH_REDIS_REST_URL;
+  
+  // Warn if both are set
+  if (hasRedisUrl && hasUpstashUrl) {
+    fastify.log.warn('Both REDIS_URL and UPSTASH_REDIS_REST_URL are set. Using Upstash REST (UPSTASH_REDIS_REST_URL).');
+  }
+  
+  const useRest = hasUpstashUrl; // Prefer Upstash if both are set
+  const redisUrl = useRest ? process.env.UPSTASH_REDIS_REST_URL : process.env.REDIS_URL;
   const redis = redisUrl ? (useRest ? new UpstashRedis({ url: process.env.UPSTASH_REDIS_REST_URL!, token: process.env.UPSTASH_REDIS_REST_TOKEN! }) : new Redis(redisUrl)) : null;
   
   // Constants
@@ -84,7 +120,8 @@ async function bootstrap(): Promise<void> {
   'use strict';
   
   // Configuration
-  const TRACKING_URL = 'https://hrl-tracking-app-production.up.railway.app';
+  const publicBase = '${publicBaseUrl}';
+  const TRACKING_URL = publicBase;
   const SHOP_DOMAIN = window.location.hostname;
   
   console.log('🚀 ECOMXTRADE TRACKING SCRIPT v2.1 LOADED FROM API');
@@ -101,7 +138,7 @@ async function bootstrap(): Promise<void> {
   const INACTIVITY_TIMEOUT = 4 * 60 * 1000; // 4 dakika
   
   // ==== Konfig ====
-  const COLLECT_URL = 'https://hrl-tracking-app-production.up.railway.app/app-proxy/collect';
+  const COLLECT_URL = publicBase + '/app-proxy/collect';
   const MAX_SESSION_GAP_MS = 30 * 60 * 1000;          // 30 dk inactivity = yeni session
   const HEARTBEAT_MS = 15000;                         // mevcut nabız süren
 
@@ -577,7 +614,7 @@ async function bootstrap(): Promise<void> {
 
     // Get active users from Redis
     if (redis) {
-      const shop = 'ecomxtrade.myshopify.com';
+      const shop = DEFAULT_SHOP;
       const key = `presence:${shop}`;
       
       try {
@@ -596,7 +633,7 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        const shopDomain = 'ecomxtrade.myshopify.com'; // Default shop for demo
+        const shopDomain = DEFAULT_SHOP; // Default shop for demo
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         
         // Get shop ID first
@@ -699,7 +736,7 @@ async function bootstrap(): Promise<void> {
 
     try {
       const q = (req.query as any) as Record<string, string>;
-      const shop = q.shop as string || 'ecomxtrade.myshopify.com';
+      const shop = q.shop as string || DEFAULT_SHOP;
       const key = `presence:${shop}`;
       
       if (useRest) {
@@ -726,7 +763,7 @@ async function bootstrap(): Promise<void> {
 
     // Get active users from Redis
     if (redis) {
-      const shop = 'ecomxtrade.myshopify.com'; // Default shop for demo
+      const shop = DEFAULT_SHOP; // Default shop for demo
       const key = `presence:${shop}`;
       
       try {
@@ -745,7 +782,7 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        const shopDomain = 'ecomxtrade.myshopify.com';
+        const shopDomain = DEFAULT_SHOP;
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         
         // Get shop PK first
@@ -954,7 +991,7 @@ async function bootstrap(): Promise<void> {
           async function fetchData() {
             try {
               // Fetch all dashboard data from API
-              const response = await fetch('https://hrl-tracking-app-production.up.railway.app/api/dashboard?t=' + Date.now());
+              const response = await fetch('${publicBaseUrl}/api/dashboard?t=' + Date.now());
               const data = await response.json();
               
               // Update all metrics
@@ -1115,7 +1152,7 @@ async function bootstrap(): Promise<void> {
   // WebSocket handler commented out for now
   /*
     const q = (req.query as any) as Record<string, string>;
-    const shop = q.shop as string || 'ecomxtrade.myshopify.com';
+    const shop = q.shop as string || DEFAULT_SHOP;
     
     console.log('WebSocket connection established for shop:', shop);
     
