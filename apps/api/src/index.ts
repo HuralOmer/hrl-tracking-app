@@ -1472,6 +1472,16 @@ async function bootstrap(): Promise<void> {
         }
 
         if (body.event === 'page_view') {
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('📄 PAGE VIEW INSERT:', {
+              shopId: shopId,
+              sessionId: sessionId,
+              path: body.page?.path || '/',
+              title: body.page?.title || '',
+              ts: new Date(tsMs).toISOString()
+            });
+          }
+          
           const { error: pageViewError } = await supabase.from('page_views').insert({
             shop_id: shopId,
             session_id: sessionId,
@@ -1483,6 +1493,13 @@ async function bootstrap(): Promise<void> {
           
           if (pageViewError) {
             fastify.log.error({ err: pageViewError }, 'Supabase page view insert error');
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('❌ PAGE VIEW INSERT ERROR:', pageViewError);
+            }
+          } else {
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('✅ PAGE VIEW INSERT SUCCESS');
+            }
           }
         }
       } catch (err) {
@@ -1632,9 +1649,13 @@ async function bootstrap(): Promise<void> {
           const finalSessionId = sessionId;
           
           if (process.env.NODE_ENV !== 'production') {
-            console.log('🎯 SESSION ID (Client):', finalSessionId);
-            console.log('🎯 VISITOR ID:', visitorId);
-            console.log('🎯 SHOP ID:', shopId);
+            console.log('🎯 COLLECT DEBUG:', {
+              event: body.event,
+              sessionId: finalSessionId,
+              visitorId: visitorId,
+              shopId: shopId,
+              timestamp: new Date().toISOString()
+            });
           }
           
           // 1) Güncelle (first_seen'e dokunma)
@@ -1709,6 +1730,16 @@ async function bootstrap(): Promise<void> {
           }
 
           if (body.event === 'page_view') {
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('📄 PAGE VIEW INSERT (app-proxy):', {
+                shopId: shopId,
+                sessionId: finalSessionId,
+                path: body.page?.path || '/',
+                title: body.page?.title || '',
+                ts: new Date(tsMs).toISOString()
+              });
+            }
+            
             const { error: pageViewError } = await supabase.from('page_views').insert({
               shop_id: shopId,
               session_id: finalSessionId,  // emniyet kemeri sonrası final session_id
@@ -1720,6 +1751,13 @@ async function bootstrap(): Promise<void> {
             
             if (pageViewError) {
               fastify.log.error({ err: pageViewError }, 'Supabase page view insert error (app-proxy)');
+              if (process.env.NODE_ENV !== 'production') {
+                console.log('❌ PAGE VIEW INSERT ERROR (app-proxy):', pageViewError);
+              }
+            } else {
+              if (process.env.NODE_ENV !== 'production') {
+                console.log('✅ PAGE VIEW INSERT SUCCESS (app-proxy)');
+              }
             }
           }
         } catch (err) {
