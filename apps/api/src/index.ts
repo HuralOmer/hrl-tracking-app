@@ -1493,7 +1493,7 @@ async function bootstrap(): Promise<void> {
         // Event deduplikasyonu için upsert kullan (event_id varsa)
         const eventData = {
           shop_id: shopId,
-          session_id: sessionId,
+          session_id: sessionId,  // sessions.id ile aynı
           name: body.event,                 // ✅
           ts: new Date(tsMs).toISOString(), // ✅
           page_path: body.page?.path || null,
@@ -1522,7 +1522,7 @@ async function bootstrap(): Promise<void> {
           
           const { error: pageViewError } = await supabase.from('page_views').insert({
             shop_id: shopId,
-            session_id: sessionId,
+            session_id: sessionId,  // sessions.id ile aynı
             path: body.page?.path || '/',     // ✅
             title: body.page?.title || '',
             engaged_ms: body.duration_ms ? Math.max(0, Math.round(body.duration_ms)) : null,
