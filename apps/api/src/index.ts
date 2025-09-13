@@ -53,7 +53,7 @@ async function bootstrap(): Promise<void> {
   await fastify.register(cors, {
     origin: '*',
     methods: ['GET', 'POST'],
-    allowedHeaders: ['content-type', 'x-tracking-key'],
+    allowedHeaders: ['content-type', 'x-tracking-key', 'if-none-match'],
   });
 
   // WebSocket support
@@ -93,32 +93,37 @@ async function bootstrap(): Promise<void> {
   // Constants
   const ACTIVE_WINDOW_SEC = 30; // 30 seconds
   
-  // Real-time subscriptions for live updates
-  if (supabase) {
-    // Subscribe to events table changes
-    supabase
-      .channel('events_changes')
-      .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'events' },
-        (payload) => {
-          fastify.log.info({ payload }, 'New event received via real-time');
-          // Broadcast to WebSocket clients if needed
-        }
-      )
-      .subscribe();
-    
-    // Subscribe to sessions table changes (optional - controlled by env flag)
-    if (process.env.REALTIME === '1') {
+  // Real-time subscriptions for live updates (controlled by REALTIME flag)
+  const channels: any[] = [];
+
+  if (supabase && process.env.REALTIME === '1') {
+    channels.push(
+      supabase
+        .channel('events_changes')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' },
+          (payload) => fastify.log.info({ payload }, 'New event via realtime')
+        )
+        .subscribe()
+    );
+
+    channels.push(
       supabase
         .channel('sessions_changes')
-        .on('postgres_changes',
-          { event: '*', schema: 'public', table: 'sessions' },
-          (payload) => {
-            fastify.log.info({ payload }, 'Session change via real-time');
-          }
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'sessions' },
+          (payload) => fastify.log.info({ payload }, 'Session change via realtime')
         )
-        .subscribe();
-    }
+        .subscribe()
+    );
+
+    fastify.addHook('onClose', async () => {
+      for (const ch of channels) {
+        try { 
+          await (supabase as any).removeChannel(ch); 
+        } catch (err) {
+          fastify.log.warn({ err }, 'Failed to remove realtime channel');
+        }
+      }
+    });
   }
   
   if ((redis as any)?.on) {
@@ -621,6 +626,10 @@ async function bootstrap(): Promise<void> {
 
   // Dashboard data API endpoint
   fastify.get('/api/dashboard', async (req, reply) => {
+    // Get shop from query parameter or use default
+    const q = (req.query as any) || {};
+    const shop = (q.shop as string) || DEFAULT_SHOP;
+    
     // Get real-time data
     const now = Math.floor(Date.now() / 1000);
     let activeUsers = 0;
@@ -630,7 +639,6 @@ async function bootstrap(): Promise<void> {
 
     // Get active users from Redis
     if (redis) {
-      const shop = DEFAULT_SHOP;
       const key = `presence:${shop}`;
       
       try {
@@ -649,7 +657,7 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        const shopDomain = DEFAULT_SHOP; // Default shop for demo
+        const shopDomain = shop;
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         
         // Get shop ID first
@@ -769,6 +777,10 @@ async function bootstrap(): Promise<void> {
 
   // Root route for embedded app - Dashboard
   fastify.get('/', async (req, reply) => {
+    // Get shop from query parameter or use default
+    const q = (req.query as any) || {};
+    const shop = (q.shop as string) || DEFAULT_SHOP;
+    
     // Get real-time data
     const now = Math.floor(Date.now() / 1000);
     let activeUsers = 0;
@@ -779,7 +791,6 @@ async function bootstrap(): Promise<void> {
 
     // Get active users from Redis
     if (redis) {
-      const shop = DEFAULT_SHOP; // Default shop for demo
       const key = `presence:${shop}`;
       
       try {
@@ -798,7 +809,7 @@ async function bootstrap(): Promise<void> {
     // Get database stats if available
     if (supabase) {
       try {
-        const shopDomain = DEFAULT_SHOP;
+        const shopDomain = shop;
         const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         
         // Get shop PK first
@@ -1006,8 +1017,12 @@ async function bootstrap(): Promise<void> {
           // Real-time data fetching
           async function fetchData() {
             try {
+              // Get shop parameter from URL or use default
+              const urlParams = new URLSearchParams(window.location.search);
+              const shop = urlParams.get('shop') || '${DEFAULT_SHOP}';
+              
               // Fetch all dashboard data from API
-              const response = await fetch('${publicBaseUrl}/api/dashboard?t=' + Date.now());
+              const response = await fetch('${publicBaseUrl}/api/dashboard?t=' + Date.now() + '&shop=' + encodeURIComponent(shop));
               const data = await response.json();
               
               // Update all metrics
@@ -1057,6 +1072,11 @@ async function bootstrap(): Promise<void> {
 
   // Admin dashboard route
   fastify.get('/admin', async (req, reply) => {
+    const key = req.headers['x-tracking-key'];
+    if (!process.env.TRACKING_KEY || key !== process.env.TRACKING_KEY) {
+      return reply.code(401).send('unauthorized');
+    }
+    
     return reply.type('text/html').send(`
       <!DOCTYPE html>
       <html lang="en">
@@ -1137,24 +1157,31 @@ async function bootstrap(): Promise<void> {
     reply.raw.setHeader('Access-Control-Allow-Origin', '*');
     reply.raw.write(`:\n\n`);
     
+    // İlk paket - bağlantı hazır
+    reply.raw.write(`event: ping\ndata: "ready"\n\n`);
+    
     const interval = setInterval(async () => {
-      const now = Math.floor(Date.now() / 1000);
-      const key = `presence:${shop}`;
-      
-      if (redis) {
-        if (useRest) {
-          await (redis as UpstashRedis).zremrangebyscore(key, 0, now - ACTIVE_WINDOW_SEC);
-        } else {
-          await (redis as any).zremrangebyscore(key, 0, now - ACTIVE_WINDOW_SEC);
-        }
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const key = `presence:${shop}`;
         
-        const current = useRest
-          ? Number(await (redis as UpstashRedis).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf'))
-          : await (redis as any).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf');
+        if (redis) {
+          if (useRest) {
+            await (redis as UpstashRedis).zremrangebyscore(key, 0, now - ACTIVE_WINDOW_SEC);
+          } else {
+            await (redis as any).zremrangebyscore(key, 0, now - ACTIVE_WINDOW_SEC);
+          }
+          
+          const current = useRest
+            ? Number(await (redis as UpstashRedis).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf'))
+            : await (redis as any).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf');
 
-        reply.raw.write(`data: ${JSON.stringify({ current, display: current, strategy: 'raw' })}\n\n`);
-      } else {
-        reply.raw.write(`data: ${JSON.stringify({ current: 0, display: 0, strategy: 'raw' })}\n\n`);
+          reply.raw.write(`data: ${JSON.stringify({ current, display: current, strategy: 'raw' })}\n\n`);
+        } else {
+          reply.raw.write(`data: ${JSON.stringify({ current: 0, display: 0, strategy: 'raw' })}\n\n`);
+        }
+      } catch (e) {
+        stop();
       }
     }, 2000);
 
