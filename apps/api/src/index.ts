@@ -27,7 +27,23 @@ const envSchema = z.object({
 async function bootstrap(): Promise<void> {
   // Validate environment variables
   try {
-    envSchema.parse(process.env);
+    const env = envSchema.parse(process.env);
+    
+    // Supabase: URL varsa en az bir key şart
+    if (env.SUPABASE_URL && !(env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY)) {
+      throw new Error('SUPABASE_URL var, ancak SUPABASE_SERVICE_ROLE_KEY ya da SUPABASE_ANON_KEY yok.');
+    }
+    
+    // Upstash: URL varsa token şart
+    if (env.UPSTASH_REDIS_REST_URL && !env.UPSTASH_REDIS_REST_TOKEN) {
+      throw new Error('UPSTASH_REDIS_REST_URL var, ancak UPSTASH_REDIS_REST_TOKEN yok.');
+    }
+    
+    // Redis: En az bir Redis konfigürasyonu şart (production'da)
+    if (process.env.NODE_ENV === 'production' && !env.REDIS_URL && !env.UPSTASH_REDIS_REST_URL) {
+      throw new Error('Production ortamında REDIS_URL ya da UPSTASH_REDIS_REST_URL gerekli.');
+    }
+    
   } catch (error) {
     console.error('❌ Environment validation failed:', error);
     process.exit(1);
