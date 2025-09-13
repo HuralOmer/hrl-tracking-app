@@ -1627,50 +1627,14 @@ async function bootstrap(): Promise<void> {
             });
           }
           
-          // Emniyet kemeri: Session rotation kontrolü
-          let finalSessionId = sessionId;
-          const MAX_SESSION_GAP_MS = 30 * 60 * 1000; // 30 dakika
+          // Client'ın gönderdiği session_id'yi her zaman kullan
+          // Session rotation client tarafında yapılıyor, server sadece kaydediyor
+          const finalSessionId = sessionId;
           
-          if (visitorId) {
-            // Aynı visitor_id ve shop_id için son session'ı kontrol et
-            const { data: lastSession } = await supabase
-              .from('sessions')
-              .select('id, last_seen')
-              .eq('visitor_id', visitorId)
-              .eq('shop_id', shopId)           // ✅ mağaza bağlamında sorgula
-              .order('last_seen', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-            
-            if (lastSession && lastSession.id !== sessionId) {
-              const timeDiff = tsMs - new Date(lastSession.last_seen).getTime();
-              
-              // Eğer son session'dan 30 dakikadan fazla geçmişse ve farklı session_id geliyorsa
-              if (timeDiff > MAX_SESSION_GAP_MS) {
-                if (process.env.NODE_ENV !== 'production') {
-                  console.log('🛡️ EMNİYET KEMERİ: Session rotation gerekli', {
-                    lastSessionId: lastSession.id,
-                    currentSessionId: sessionId,
-                    visitorId: visitorId,
-                    shopId: shopId,
-                    timeDiff: timeDiff,
-                    timeDiffMinutes: Math.round(timeDiff / (1000 * 60))
-                  });
-                }
-                
-                // Yeni session_id oluştur (client'ın gönderdiği session_id'yi kullan)
-                finalSessionId = sessionId;
-                if (process.env.NODE_ENV !== 'production') {
-                  console.log('✅ Yeni session kullanılıyor:', finalSessionId);
-                }
-              } else {
-                // Aynı session devam ediyor, mevcut session_id'yi kullan
-                finalSessionId = lastSession.id;
-                if (process.env.NODE_ENV !== 'production') {
-                  console.log('🔄 Mevcut session devam ediyor:', finalSessionId);
-                }
-              }
-            }
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('🎯 SESSION ID (Client):', finalSessionId);
+            console.log('🎯 VISITOR ID:', visitorId);
+            console.log('🎯 SHOP ID:', shopId);
           }
           
           // 1) Güncelle (first_seen'e dokunma)
