@@ -139,6 +139,32 @@ async function bootstrap(): Promise<void> {
   // Health check
   fastify.get('/health', async () => ({ ok: true }));
 
+  // Debug endpoint - sessions sayısını kontrol et
+  fastify.get('/debug/sessions', async (req, reply) => {
+    if (!supabase) {
+      return reply.send({ error: 'No Supabase connection' });
+    }
+    
+    try {
+      const { data: sessions, error } = await supabase
+        .from('sessions')
+        .select('id, first_seen, last_seen, visitor_id')
+        .order('first_seen', { ascending: false })
+        .limit(10);
+      
+      if (error) {
+        return reply.send({ error: error.message });
+      }
+      
+      return reply.send({
+        total: sessions?.length || 0,
+        sessions: sessions || []
+      });
+    } catch (err) {
+      return reply.send({ error: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  });
+
   // Tracker.js endpoint - Cache busting ile
   fastify.get('/tracker.js', async (req, reply) => {
     const trackerScript = `
@@ -207,11 +233,21 @@ async function bootstrap(): Promise<void> {
     const { s, lastSeen, SKEY, LKEY } = getSessionState();
     const now = Date.now();
 
+    console.log('🔄 SESSION ROTATION CHECK:', {
+      hasSession: !!s,
+      lastSeen: lastSeen,
+      sessionLastSeen: s?.last_seen,
+      timeDiff: s ? (now - (s.last_seen || lastSeen || s.started_at)) : 0,
+      maxGap: MAX_SESSION_GAP_MS,
+      needsRotation: s ? ((now - (s.last_seen || lastSeen || s.started_at)) > MAX_SESSION_GAP_MS) : true
+    });
+
     // İlk açılış veya tarayıcı kapanmış → sessionStorage yok → yeni oturum
     if (!s) {
       const newS = { id: uuid(), started_at: now, last_seen: now };
       sessionStorage.setItem(SKEY, JSON.stringify(newS));
       localStorage.setItem(LKEY, String(now));
+      console.log('🆕 NEW SESSION CREATED (no existing):', newS.id);
       return newS;
     }
 
@@ -220,10 +256,12 @@ async function bootstrap(): Promise<void> {
       const newS = { id: uuid(), started_at: now, last_seen: now };
       sessionStorage.setItem(SKEY, JSON.stringify(newS));
       localStorage.setItem(LKEY, String(now));
+      console.log('🆕 NEW SESSION CREATED (inactivity):', newS.id, 'old:', s.id);
       return newS;
     }
 
     // mevcut oturumu sürdür
+    console.log('🔄 KEEPING EXISTING SESSION:', s.id);
     return s;
   }
 
@@ -1648,20 +1686,18 @@ async function bootstrap(): Promise<void> {
           // Session rotation client tarafında yapılıyor, server sadece kaydediyor
           const finalSessionId = sessionId;
           
-          if (process.env.NODE_ENV !== 'production') {
-            console.log('🎯 COLLECT DEBUG:', {
-              event: body.event,
-              sessionId: finalSessionId,
-              visitorId: visitorId,
-              shopId: shopId,
-              timestamp: new Date().toISOString()
-            });
-          }
+          // Debug log'ları geçici olarak her zaman göster
+          console.log('🎯 COLLECT DEBUG:', {
+            event: body.event,
+            sessionId: finalSessionId,
+            visitorId: visitorId,
+            shopId: shopId,
+            timestamp: new Date().toISOString()
+          });
           
           // 1) Güncelle (first_seen'e dokunma)
-          if (process.env.NODE_ENV !== 'production') {
-            console.log('🔄 UPDATING SESSION (Supabase):', finalSessionId);
-          }
+          // Debug log'ları geçici olarak her zaman göster
+          console.log('🔄 UPDATING SESSION (Supabase):', finalSessionId);
           
           const { data: updated, error: updErr } = await supabase
             .from('sessions')
@@ -1675,11 +1711,13 @@ async function bootstrap(): Promise<void> {
             .select('id')  // Supabase v2'de etkilenen satırı görmek için select gerekir
             .maybeSingle();
 
+          if (updErr) {
+            console.log('❌ SESSION UPDATE ERROR:', updErr);
+          }
+
           if (!updated) {
             // 2) Satır yoksa INSERT (first_seen burada set edilir)
-            if (process.env.NODE_ENV !== 'production') {
-              console.log('🆕 INSERTING NEW SESSION (Supabase):', finalSessionId);
-            }
+            console.log('🆕 INSERTING NEW SESSION (Supabase):', finalSessionId);
             const { error: insErr } = await supabase.from('sessions').insert({
               id: finalSessionId,
               shop_id: shopId,
@@ -1692,21 +1730,16 @@ async function bootstrap(): Promise<void> {
             });
             // INSERT başarısız olursa (yarış durumu), last_seen'i güncelle
             if (insErr) {
-              if (process.env.NODE_ENV !== 'production') {
-                console.log('🔄 Session INSERT yarışı (app-proxy), last_seen güncelleniyor:', finalSessionId);
-              }
+              console.log('🔄 Session INSERT yarışı (app-proxy), last_seen güncelleniyor:', finalSessionId);
+              console.log('❌ INSERT ERROR:', insErr);
               await supabase.from('sessions')
                 .update({ last_seen: new Date(tsMs).toISOString() })
                 .eq('id', finalSessionId);
             } else {
-              if (process.env.NODE_ENV !== 'production') {
-                console.log(`✅ SESSION INSERTED SUCCESSFULLY (Supabase): ${finalSessionId}`);
-              }
+              console.log(`✅ SESSION INSERTED SUCCESSFULLY (Supabase): ${finalSessionId}`);
             }
           } else {
-            if (process.env.NODE_ENV !== 'production') {
-              console.log(`✅ SESSION UPDATED SUCCESSFULLY (Supabase): ${finalSessionId}`);
-            }
+            console.log(`✅ SESSION UPDATED SUCCESSFULLY (Supabase): ${finalSessionId}`);
           }
 
           // Events/Page views aynen (sadece foreign key doğru id)
