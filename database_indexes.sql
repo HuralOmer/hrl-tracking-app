@@ -1,5 +1,14 @@
 -- Database Index & Unique Constraints for Performance + Deduplication
 -- Run these commands in Supabase SQL Editor
+-- 
+-- IMPORTANT: Bu index'ler olmadan dashboard sorguları yavaşlar!
+-- Özellikle 24 saatlik aralıklarda büyük veri setlerinde performans sorunu yaşanır.
+--
+-- KRİTİK INDEX'LER (MUTLAKA ÇALIŞTIRIN):
+-- sessions (shop_id, first_seen) - Dashboard performansı için şart
+-- page_views (shop_id, ts) - Sayfa görüntüleme sorguları için şart  
+-- events (shop_id, ts) - Event sorguları için şart
+-- events (shop_id, event_id) unique - Event deduplikasyon için şart
 
 -- 1. Event deduplication (event_id varsa)
 -- Prevents duplicate events with same event_id per shop

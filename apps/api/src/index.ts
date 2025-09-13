@@ -49,7 +49,12 @@ async function bootstrap(): Promise<void> {
     process.exit(1);
   }
 
-  const fastify = Fastify({ logger: true });
+  const fastify = Fastify({ 
+    logger: { 
+      level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' 
+    },
+    bodyLimit: 1024 * 64 // 64KB; SPA'larda event payload'ları büyüyebilir
+  });
   await fastify.register(cors, {
     origin: '*',
     methods: ['GET', 'POST'],
@@ -92,6 +97,7 @@ async function bootstrap(): Promise<void> {
   
   // Constants
   const ACTIVE_WINDOW_SEC = 30; // 30 seconds
+  const SHOP_RE = /^[a-z0-9.-]{3,255}$/i; // Shop domain validation regex
   
   // Real-time subscriptions for live updates (controlled by REALTIME flag)
   const channels: any[] = [];
@@ -152,6 +158,8 @@ async function bootstrap(): Promise<void> {
   let leaderTabId = null;
   let heartbeatInterval = null;
   let leaderTimestampInterval = null;
+  // Heartbeat (sayfa ziyareti) interval'ı en başta tanımla (TDZ hatasını önler)
+  let visitHeartbeatInterval = null;
   
   // Activity tracking
   let lastActivityTime = Date.now();
@@ -415,7 +423,6 @@ async function bootstrap(): Promise<void> {
   send('session_start');
 
   // ==== Heartbeat ====
-  let visitHeartbeatInterval = null;
   visitHeartbeatInterval = setInterval(() => {
     // Sadece aktif kullanıcı için heartbeat gönder
     const now = Date.now();
@@ -433,7 +440,7 @@ async function bootstrap(): Promise<void> {
       session_id: SESSION.id,
       visitor_id: VISITOR_ID,
       ts: Date.now(),
-      event_id: (crypto.randomUUID ? crypto.randomUUID() : uuid()),
+      event_id: uuid(),
       page: { path: location.pathname, title: document.title, ref: document.referrer },
       shop_domain: SHOP_DOMAIN   // ✅ Zorunlu alanı ekle
     };
@@ -626,9 +633,17 @@ async function bootstrap(): Promise<void> {
 
   // Dashboard data API endpoint
   fastify.get('/api/dashboard', async (req, reply) => {
+    // Cache kontrolü - real-time veri için cache yok
+    reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    
     // Get shop from query parameter or use default
     const q = (req.query as any) || {};
     const shop = (q.shop as string) || DEFAULT_SHOP;
+    
+    // Sanitize shop parameter for security
+    if (!SHOP_RE.test(shop)) {
+      return reply.code(400).send({ ok: false, error: 'invalid_shop' });
+    }
     
     // Get real-time data
     const now = Math.floor(Date.now() / 1000);
@@ -674,6 +689,7 @@ async function bootstrap(): Promise<void> {
             totalSessions: 0,
             pageViews: 0,
             conversionRate: 0,
+            shop,
             timestamp: new Date().toISOString(),
             error: 'shop_not_found'
           });
@@ -715,14 +731,16 @@ async function bootstrap(): Promise<void> {
           conversionRate = totalSessions > 0 ? parseFloat((((conversions || 0) / totalSessions) * 100).toFixed(1)) : 0;
         }
         
-        console.log('📊 API DASHBOARD STATS:', {
-          totalSessions,
-          pageViews,
-          conversionRate,
-          shopId,
-          shopDomain,
-          timeRange: '24 hours'
-        });
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('📊 API DASHBOARD STATS:', {
+            totalSessions,
+            pageViews,
+            conversionRate,
+            shopId,
+            shopDomain,
+            timeRange: '24 hours'
+          });
+        }
       } catch (err) {
         fastify.log.error({ err }, 'Supabase error in dashboard API');
         // Fallback to demo data
@@ -742,6 +760,7 @@ async function bootstrap(): Promise<void> {
       totalSessions,
       pageViews,
       conversionRate,
+      shop,
       timestamp: new Date().toISOString()
     });
   });
@@ -761,6 +780,12 @@ async function bootstrap(): Promise<void> {
     try {
       const q = (req.query as any) as Record<string, string>;
       const shop = q.shop as string || DEFAULT_SHOP;
+      
+      // Sanitize shop parameter for security
+      if (!SHOP_RE.test(shop)) {
+        return reply.code(400).send({ ok: false, error: 'invalid_shop' });
+      }
+      
       const key = `presence:${shop}`;
       
       if (useRest) {
@@ -780,6 +805,11 @@ async function bootstrap(): Promise<void> {
     // Get shop from query parameter or use default
     const q = (req.query as any) || {};
     const shop = (q.shop as string) || DEFAULT_SHOP;
+    
+    // Sanitize shop parameter for security
+    if (!SHOP_RE.test(shop)) {
+      return reply.code(400).send({ ok: false, error: 'invalid_shop' });
+    }
     
     // Get real-time data
     const now = Math.floor(Date.now() / 1000);
@@ -896,15 +926,17 @@ async function bootstrap(): Promise<void> {
           }
         }
         
-        console.log('📊 DASHBOARD STATS:', {
-          totalSessions,
-          uniqueVisitors,
-          pageViews,
-          conversionRate,
-          shopPk,
-          shopDomain,
-          timeRange: '24 hours'
-        });
+        if (process.env.NODE_ENV !== 'production') {
+          console.log('📊 DASHBOARD STATS:', {
+            totalSessions,
+            uniqueVisitors,
+            pageViews,
+            conversionRate,
+            shopPk,
+            shopDomain,
+            timeRange: '24 hours'
+          });
+        }
       } catch (err) {
         fastify.log.error({ err }, 'Supabase error in dashboard stats');
         // Fallback to demo data
@@ -1026,10 +1058,11 @@ async function bootstrap(): Promise<void> {
               const data = await response.json();
               
               // Update all metrics
-              document.getElementById('activeUsers').textContent = data.activeUsers || 0;
-              document.getElementById('totalSessions').textContent = data.totalSessions || 0;
-              document.getElementById('pageViews').textContent = data.pageViews || 0;
-              document.getElementById('conversionRate').textContent = data.conversionRate + '%' || '0%';
+              const cr = (data && data.conversionRate != null) ? data.conversionRate : 0;
+              document.getElementById('conversionRate').textContent = cr + '%';
+              document.getElementById('activeUsers').textContent   = Number.isFinite(data.activeUsers)   ? data.activeUsers   : 0;
+              document.getElementById('totalSessions').textContent = Number.isFinite(data.totalSessions) ? data.totalSessions : 0;
+              document.getElementById('pageViews').textContent     = Number.isFinite(data.pageViews)     ? data.pageViews     : 0;
               
               // Update change indicators
               const updateTime = new Date().toLocaleTimeString();
@@ -1123,22 +1156,29 @@ async function bootstrap(): Promise<void> {
   fastify.post('/presence/beat', async (req: any, reply: any) => {
     const body = z
       .object({ 
-        shop: z.string().min(1).max(255), 
-        session_id: z.string().uuid(), 
-        ts: z.number().positive() 
+        shop: z.string().min(1).max(255),
+        session_id: z.string().uuid(),
+        ts: z.number().positive().optional() // artık opsiyonel; yok saysak da olur
       })
       .parse(req.body);
+    
+    // Güvenlik: shop domain formatını doğrula
+    if (!SHOP_RE.test(body.shop)) {
+      return reply.code(400).send({ ok: false, error: 'invalid_shop' });
+    }
     
     if (!redis) {
       return reply.send({ ok: true, note: 'no_redis_dev' });
     }
     
     const key = `presence:${body.shop}`;
+    const serverNowSec = Math.floor(Date.now() / 1000);
+    
     if (useRest) {
-      await (redis as UpstashRedis).zadd(key, { score: body.ts / 1000, member: body.session_id });
+      await (redis as UpstashRedis).zadd(key, { score: serverNowSec, member: body.session_id });
       await (redis as UpstashRedis).expire(key, 300);
     } else {
-      await (redis as any).zadd(key, body.ts / 1000, body.session_id);
+      await (redis as any).zadd(key, serverNowSec, body.session_id);
       await (redis as any).expire(key, 300);
     }
     reply.send({ ok: true });
@@ -1149,15 +1189,22 @@ async function bootstrap(): Promise<void> {
     const q = (req.query as any) as Record<string, string>;
     const shop = q.shop as string;
     if (!shop) return reply.code(400).send({ ok: false, error: 'shop_required' });
+    
+    // Sanitize shop parameter for security
+    if (!SHOP_RE.test(shop)) {
+      return reply.code(400).send({ ok: false, error: 'invalid_shop' });
+    }
 
     reply.hijack();
     reply.raw.setHeader('Content-Type', 'text/event-stream');
     reply.raw.setHeader('Cache-Control', 'no-cache');
     reply.raw.setHeader('Connection', 'keep-alive');
     reply.raw.setHeader('Access-Control-Allow-Origin', '*');
+    reply.raw.setHeader('X-Accel-Buffering', 'no'); // Nginx proxy desteği
     reply.raw.write(`:\n\n`);
     
-    // İlk paket - bağlantı hazır
+    // Reconnect interval bildir
+    reply.raw.write(`retry: 5000\n`);
     reply.raw.write(`event: ping\ndata: "ready"\n\n`);
     
     const interval = setInterval(async () => {
@@ -1185,7 +1232,36 @@ async function bootstrap(): Promise<void> {
       }
     }, 2000);
 
-    const stop = () => clearInterval(interval);
+    const stop = () => {
+      clearInterval(interval);
+      try { reply.raw.end(); } catch {}
+    };
+
+    // İlk değer hemen
+    (async () => {
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const key = `presence:${shop}`;
+        
+        if (redis) {
+          if (useRest) {
+            await (redis as UpstashRedis).zremrangebyscore(key, 0, now - ACTIVE_WINDOW_SEC);
+          } else {
+            await (redis as any).zremrangebyscore(key, 0, now - ACTIVE_WINDOW_SEC);
+          }
+          
+          const current = useRest
+            ? Number(await (redis as UpstashRedis).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf'))
+            : await (redis as any).zcount(key, now - ACTIVE_WINDOW_SEC, '+inf');
+
+          reply.raw.write(`data: ${JSON.stringify({ current, display: current, strategy: 'raw' })}\n\n`);
+        } else {
+          reply.raw.write(`data: ${JSON.stringify({ current: 0, display: 0, strategy: 'raw' })}\n\n`);
+        }
+      } catch (e) {
+        stop();
+      }
+    })();
     (req.raw as any).on('close', stop);
     (req.raw as any).on('error', stop);
   });
@@ -1310,6 +1386,15 @@ async function bootstrap(): Promise<void> {
       ? schema.parse(JSON.parse(req.body))
       : schema.parse(req.body);
 
+    if (!SHOP_RE.test(body.shop_domain)) {
+      return reply.code(400).send({ ok: false, error: 'invalid_shop' });
+    }
+    
+    // TS güvenliği: +/- 5dk dışındaki ts'leri server saatine çek
+    const nowMs = Date.now();
+    const tsMs = (typeof body.ts === 'number' && Math.abs(nowMs - body.ts) <= 5 * 60 * 1000)
+      ? body.ts : nowMs;
+
     if (supabase) {
       try {
         // Upsert shop by domain
@@ -1327,7 +1412,6 @@ async function bootstrap(): Promise<void> {
         const shopId = shopData.id;
         const sessionId = body.session_id;
         const visitorId = body.visitor_id || null;
-        const tsMs = body.ts ?? Date.now();
 
         // 1) Güncelle (first_seen'e dokunma)
         const { data: updated, error: updErr } = await supabase
@@ -1344,6 +1428,7 @@ async function bootstrap(): Promise<void> {
 
         if (!updated) {
           // 2) Satır yoksa INSERT (first_seen burada set edilir)
+          // INSERT yarışlarını yumuşatmak için önce insert ... on conflict do nothing
           const { error: insErr } = await supabase.from('sessions').insert({
             id: sessionId,
             shop_id: shopId,
@@ -1354,7 +1439,16 @@ async function bootstrap(): Promise<void> {
             ua: (req.headers['user-agent'] as string) || null,
             referrer: body.page?.ref || null
           });
-          if (insErr) fastify.log.error({ insErr }, 'sessions insert failed');
+          
+          // INSERT başarısız olursa (yarış durumu), last_seen'i güncelle
+          if (insErr) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('🔄 Session INSERT yarışı, last_seen güncelleniyor:', sessionId);
+            }
+            await supabase.from('sessions')
+              .update({ last_seen: new Date(tsMs).toISOString() })
+              .eq('id', sessionId);
+          }
         }
 
         // Events/Page views aynen (sadece foreign key doğru id)
@@ -1411,6 +1505,11 @@ async function bootstrap(): Promise<void> {
       const q = (req.query as any) as Record<string, string>;
       const shop = q.shop as string;
       if (!shop) return reply.code(400).send({ ok: false, error: 'shop_required' });
+      
+      // Sanitize shop parameter for security
+      if (!SHOP_RE.test(shop)) {
+        return reply.code(400).send({ ok: false, error: 'invalid_shop' });
+      }
 
       const now = Math.floor(Date.now() / 1000);
       const key = `presence:${shop}`;
@@ -1473,17 +1572,30 @@ async function bootstrap(): Promise<void> {
         ? schema.parse(JSON.parse(req.body))
         : schema.parse(req.body);
 
+      if (!SHOP_RE.test(body.shop_domain)) {
+        return reply.code(400).send({ ok: false, error: 'invalid_shop' });
+      }
+      
+      // TS güvenliği: +/- 5dk dışındaki ts'leri server saatine çek
+      const nowMs = Date.now();
+      const tsMs = (typeof body.ts === 'number' && Math.abs(nowMs - body.ts) <= 5 * 60 * 1000)
+        ? body.ts : nowMs;
+
       // Debug: Supabase kullanımını kontrol et
-      console.log('🔍 SUPABASE DEBUG:', {
-        hasSupabase: !!supabase,
-        supabaseUrl: process.env.SUPABASE_URL ? 'SET' : 'NOT_SET',
-        event: body.event,
-        sessionId: body.session_id
-      });
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('🔍 SUPABASE DEBUG:', {
+          hasSupabase: !!supabase,
+          supabaseUrl: process.env.SUPABASE_URL ? 'SET' : 'NOT_SET',
+          event: body.event,
+          sessionId: body.session_id
+        });
+      }
 
       // Force log to stdout for Railway
-      process.stdout.write(`\n🔍 SUPABASE DEBUG: hasSupabase=${!!supabase}\n`);
-      process.stdout.write(`🔍 ENV VARS: SUPABASE_URL=${process.env.SUPABASE_URL ? 'SET' : 'NOT_SET'}\n`);
+      if (process.env.NODE_ENV !== 'production') {
+        process.stdout.write(`\n🔍 SUPABASE DEBUG: hasSupabase=${!!supabase}\n`);
+        process.stdout.write(`🔍 ENV VARS: SUPABASE_URL=${process.env.SUPABASE_URL ? 'SET' : 'NOT_SET'}\n`);
+      }
 
       if (supabase) {
         try {
@@ -1504,15 +1616,16 @@ async function bootstrap(): Promise<void> {
           // Session ve visitor bilgilerini al
           const sessionId = body.session_id;
           const visitorId = body.visitor_id || null;
-          const tsMs = body.ts ?? Date.now();
           
-          console.log('🎯 COLLECT DEBUG:', {
-            event: body.event,
-            sessionId: sessionId,
-            visitorId: visitorId,
-            shopId: shopId,
-            timestamp: new Date().toISOString()
-          });
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('🎯 COLLECT DEBUG:', {
+              event: body.event,
+              sessionId: sessionId,
+              visitorId: visitorId,
+              shopId: shopId,
+              timestamp: new Date().toISOString()
+            });
+          }
           
           // Emniyet kemeri: Session rotation kontrolü
           let finalSessionId = sessionId;
@@ -1534,28 +1647,36 @@ async function bootstrap(): Promise<void> {
               
               // Eğer son session'dan 30 dakikadan fazla geçmişse ve farklı session_id geliyorsa
               if (timeDiff > MAX_SESSION_GAP_MS) {
-                console.log('🛡️ EMNİYET KEMERİ: Session rotation gerekli', {
-                  lastSessionId: lastSession.id,
-                  currentSessionId: sessionId,
-                  visitorId: visitorId,
-                  shopId: shopId,
-                  timeDiff: timeDiff,
-                  timeDiffMinutes: Math.round(timeDiff / (1000 * 60))
-                });
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('🛡️ EMNİYET KEMERİ: Session rotation gerekli', {
+                    lastSessionId: lastSession.id,
+                    currentSessionId: sessionId,
+                    visitorId: visitorId,
+                    shopId: shopId,
+                    timeDiff: timeDiff,
+                    timeDiffMinutes: Math.round(timeDiff / (1000 * 60))
+                  });
+                }
                 
                 // Yeni session_id oluştur (client'ın gönderdiği session_id'yi kullan)
                 finalSessionId = sessionId;
-                console.log('✅ Yeni session kullanılıyor:', finalSessionId);
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('✅ Yeni session kullanılıyor:', finalSessionId);
+                }
               } else {
                 // Aynı session devam ediyor, mevcut session_id'yi kullan
                 finalSessionId = lastSession.id;
-                console.log('🔄 Mevcut session devam ediyor:', finalSessionId);
+                if (process.env.NODE_ENV !== 'production') {
+                  console.log('🔄 Mevcut session devam ediyor:', finalSessionId);
+                }
               }
             }
           }
           
           // 1) Güncelle (first_seen'e dokunma)
-          console.log('🔄 UPDATING SESSION (Supabase):', finalSessionId);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log('🔄 UPDATING SESSION (Supabase):', finalSessionId);
+          }
           
           const { data: updated, error: updErr } = await supabase
             .from('sessions')
@@ -1571,7 +1692,9 @@ async function bootstrap(): Promise<void> {
 
           if (!updated) {
             // 2) Satır yoksa INSERT (first_seen burada set edilir)
-            console.log('🆕 INSERTING NEW SESSION (Supabase):', finalSessionId);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('🆕 INSERTING NEW SESSION (Supabase):', finalSessionId);
+            }
             const { error: insErr } = await supabase.from('sessions').insert({
               id: finalSessionId,
               shop_id: shopId,
@@ -1582,13 +1705,23 @@ async function bootstrap(): Promise<void> {
               ua: (req.headers['user-agent'] as string) || null,
               referrer: body.page?.ref || null
             });
+            // INSERT başarısız olursa (yarış durumu), last_seen'i güncelle
             if (insErr) {
-              fastify.log.error({ insErr }, 'sessions insert failed (app-proxy)');
+              if (process.env.NODE_ENV !== 'production') {
+                console.log('🔄 Session INSERT yarışı (app-proxy), last_seen güncelleniyor:', finalSessionId);
+              }
+              await supabase.from('sessions')
+                .update({ last_seen: new Date(tsMs).toISOString() })
+                .eq('id', finalSessionId);
             } else {
-              console.log(`✅ SESSION INSERTED SUCCESSFULLY (Supabase): ${finalSessionId}`);
+              if (process.env.NODE_ENV !== 'production') {
+                console.log(`✅ SESSION INSERTED SUCCESSFULLY (Supabase): ${finalSessionId}`);
+              }
             }
           } else {
-            console.log(`✅ SESSION UPDATED SUCCESSFULLY (Supabase): ${finalSessionId}`);
+            if (process.env.NODE_ENV !== 'production') {
+              console.log(`✅ SESSION UPDATED SUCCESSFULLY (Supabase): ${finalSessionId}`);
+            }
           }
 
           // Events/Page views aynen (sadece foreign key doğru id)
